@@ -1,0 +1,143 @@
+{% comment %}
+  ============================================================
+  eTHI Cruise Ship Inspection Scores – Single-Page Web Template
+  ============================================================
+  Follows the same consolidated-includes pattern used by the
+  GI Report and SSI Request web templates.
+
+  Power Pages hierarchy:
+    Page Template  → points to this Web Template
+    Web Page (EN)  → /en/Resultats-Navires-Ship-Scores/
+    Web Page (FR)  → /fr/Resultats-Navires-Ship-Scores/
+
+  Both language Web Pages reference the SAME Page Template.
+  The lang attribute on <html> is set by Power Pages based on
+  the selected language; all bilingual text comes from content
+  snippets rendered server-side via Liquid.
+
+  This is a READ-ONLY public page (no form, no reCAPTCHA,
+  no validators, no session timeout).
+  ============================================================
+{% endcomment %}
+
+{%- comment -%} ===== Cache-bust version string ===== {%- endcomment -%}
+{%- assign env = settings['ethiEnvironment'] | default: 'prod' | downcase | strip -%}
+{%- assign is_dev = env == 'dev' -%}
+
+{%- if is_dev -%}
+  {%- assign _ver = 'now' | date: '%Y%m%d%H%M%S' -%}
+{%- else -%}
+  {%- assign _ver = 'v1' -%}
+{%- endif -%}
+
+{%- comment -%} ===== CSS ===== {%- endcomment -%}
+<link rel="stylesheet" href="/custom.css?v={{ _ver }}">
+<link rel="stylesheet" href="/shipScores.css?v={{ _ver }}">
+
+{%- comment -%} ===== JS (load order matters) ===== {%- endcomment -%}
+<script src="/ethiDiagnostics.js?v={{ _ver }}" defer=""></script>
+<script src="/ethiUniversalAnnounce.js?v={{ _ver }}" defer=""></script>
+<script src="/ethiLibrary.js?v={{ _ver }}" defer=""></script>
+<script src="/shipScores.js?v={{ _ver }}" defer=""></script>
+
+{%- comment -%}
+  ===== Page Content =====
+  The outer row/container div matches the Power Pages default
+  sectionBlockLayout wrapper that the design studio generates.
+{%- endcomment -%}
+<div class="row sectionBlockLayout text-start" style="display: flex; flex-wrap: wrap; margin: 0px; min-height: auto; padding: 1px;">
+  <div class="container" style="display: flex; flex-wrap: wrap; padding: 8px; margin: 10px 0px;">
+
+    {%- comment -%} ===== Search ===== {%- endcomment -%}
+    <div class="browse-search" role="search" aria-label="{{ snippets['ethi-ship-scores-search-label'] | default: 'Search' }}">
+      <label for="linerSearch">{{ snippets['ethi-ship-scores-search-label'] | default: 'Search' }}</label>
+      <input type="search"
+             id="linerSearch"
+             class="form-control browse-search__input"
+             placeholder=" "
+             autocomplete="off"
+             aria-describedby="linerSearchHelp linerSearchStatus">
+      <p id="linerSearchHelp" class="small text-muted">
+        {{ snippets['ethi-ship-scores-search-help'] | default: 'Type to filter cruise lines. Results update as you type. Press Escape to clear the search.' }}
+      </p>
+      <p id="linerSearchStatus"
+         class="browse-search__status"
+         aria-live="polite"
+         aria-atomic="true"
+         role="status"></p>
+    </div>
+
+    {%- comment -%} ===== Browse Tree ===== {%- endcomment -%}
+    <div class="browse-page-frame">
+      <div id="browseTree" aria-label="{{ snippets['ethi-ship-scores-title'] | default: 'Cruise ship inspection scores' }}"></div>
+    </div>
+
+    {%- comment -%}
+      ===== i18n Data Element =====
+      All bilingual strings consumed by shipScores.js are rendered
+      here as data-* attributes.  JS reads these once at init.
+    {%- endcomment -%}
+    <span id="shipScores_i18n" class="wb-inv"
+      data-status-loading="{{ snippets['ethi-ship-scores-search-status-loading'] | default: 'Loading results…' | escape }}"
+      data-status-empty="{{ snippets['ethi-ship-scores-search-status-empty'] | default: 'No results available.' | escape }}"
+      data-status-template="{{ snippets['ethi-ship-scores-search-status-template'] | default: '{{liners}} cruise line(s) match. {{ships}} ship(s) shown.' | escape }}"
+      data-status-none="{{ snippets['ethi-ship-scores-search-status-none'] | default: 'No matches.' | escape }}"
+      data-status-cleared="{{ snippets['ethi-ship-scores-search-status-cleared'] | default: 'Showing all cruise lines and ships.' | escape }}"
+      data-announce-data-loaded="{{ snippets['ethi-ship-scores-announce-data-loaded'] | default: 'Cruise ship data loaded. {{liners}} cruise line(s) available.' | escape }}"
+      data-announce-data-error="{{ snippets['ethi-ship-scores-announce-data-error'] | default: 'Error loading cruise ship data. Please try again later.' | escape }}"
+      data-announce-liner-expanded="{{ snippets['ethi-ship-scores-announce-liner-expanded'] | default: '{{name}} expanded. {{ships}} ship(s) available.' | escape }}"
+      data-announce-liner-collapsed="{{ snippets['ethi-ship-scores-announce-liner-collapsed'] | default: '{{name}} collapsed.' | escape }}"
+      data-announce-ship-expanded="{{ snippets['ethi-ship-scores-announce-ship-expanded'] | default: '{{name}} expanded. Loading inspection history.' | escape }}"
+      data-announce-ship-collapsed="{{ snippets['ethi-ship-scores-announce-ship-collapsed'] | default: '{{name}} collapsed.' | escape }}"
+      data-announce-history-loaded="{{ snippets['ethi-ship-scores-announce-history-loaded'] | default: 'Inspection history loaded. {{count}} inspection(s) found.' | escape }}"
+      data-announce-history-empty="{{ snippets['ethi-ship-scores-announce-history-empty'] | default: 'No inspection history found for {{name}}.' | escape }}"
+      data-announce-history-error="{{ snippets['ethi-ship-scores-announce-history-error'] | default: 'Error loading inspection history for {{name}}.' | escape }}">
+    </span>
+
+    {%- comment -%}
+      ===== Table Text Data Element =====
+      Column headers and table structure text, consumed by JS
+      when building inspection history tables.
+    {%- endcomment -%}
+    <span id="shipScoresText" class="wb-inv"
+      data-date-header="{{ snippets['ethi-ship-scores-date-header'] | default: 'Date of inspection (YYYY-MM-DD)' | escape }}"
+      data-score-header="{{ snippets['ethi-ship-scores-score-header'] | default: 'Score obtained' | escape }}"
+      data-history-title="{{ snippets['ethi-ship-scores-history-title'] | default: 'Vessel inspection history' | escape }}"
+      data-history-caption="{{ snippets['ethi-ship-scores-history-caption'] | default: 'Inspection history (YYYY-MM-DD)' | escape }}"
+      data-loading="{{ snippets['ethi-ship-scores-loading'] | default: 'Loading inspection history…' | escape }}"
+      data-no-history="{{ snippets['ethi-ship-scores-no-history'] | default: 'No inspection history available.' | escape }}"
+      data-error="{{ snippets['ethi-ship-scores-error'] | default: 'Unable to load inspection history. Please try again later.' | escape }}"
+      data-cruise-ship="{{ snippets['ethi-ship-scores-cruise-ship'] | default: 'Cruise ship' | escape }}">
+    </span>
+
+    {%- comment -%}
+      ===== Ship Details Template =====
+      Server-rendered once, cloned by JS for each vessel.
+      Liquid snippets bake bilingual text into this template;
+      JS clones it via cloneNode(true) so text is preserved
+      without duplicating i18n strings in JavaScript.
+    {%- endcomment -%}
+    <template id="shipDetailsTemplate">
+      <div class="ship-details" style="display:none;">
+        <h4 class="ship-details__title" tabindex="-1">
+          {{ snippets['ethi-ship-scores-history-title'] | default: 'Vessel inspection history' }}
+        </h4>
+        <section data-ship-focus="history" role="region">
+          <table class="ship-details__table table table-striped">
+            <caption class="wb-inv">
+              {{ snippets['ethi-ship-scores-history-caption'] | default: 'Inspection history (YYYY-MM-DD)' }}
+            </caption>
+            <thead>
+              <tr>
+                <th scope="col">{{ snippets['ethi-ship-scores-date-header'] | default: 'Date of inspection (YYYY-MM-DD)' }}</th>
+                <th scope="col">{{ snippets['ethi-ship-scores-score-header'] | default: 'Score obtained' }}</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </section>
+      </div>
+    </template>
+
+  </div>
+</div>

@@ -1,0 +1,46 @@
+/* ============================================================
+   shipScores.css — DIFF: Append to end of existing file
+   ============================================================
+   These styles are NEW additions. Paste at the bottom of your
+   current shipScores.css, after the last existing rule.
+   ============================================================ */
+
+/* ============================================================
+   Loading / Error / Empty UX states
+   Rendered by JS: showTreeLoading(), showTreeError()
+   ============================================================ */
+
+.browse-tree__loading,
+.browse-tree__error{
+  padding: 1.5rem 1rem;
+  text-align: center;
+  font-size: 1.1rem;
+  line-height: 1.6;
+  border-radius: 6px;
+}
+
+.browse-tree__loading{
+  color: #555;
+  background: #f8f9fa;
+  border: 1px solid #dee2e6;
+}
+
+.browse-tree__error{
+  color: #842029;
+  background: #f8d7da;
+  border: 1px solid #f5c2c7;
+}
+
+/* ============================================================
+   Print styles — collapse tree, show data
+   ============================================================ */
+@media print{
+  .browse-search{ display: none; }
+  details.browse-tree__liner,
+  details.browse-tree__ship{ break-inside: avoid; }
+  summary.browse-tree__summary{
+    border: none;
+    background: none;
+    box-shadow: none;
+  }
+}
