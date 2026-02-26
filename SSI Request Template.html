@@ -1,16 +1,119 @@
 <!-- ============================================================================
-  SSI Request - Single Page Form (Proof of Concept v2)
-  Web Template: ssi-request-template
-
-  Architecture: Power Pages empty shell + Liquid + wb-frmvld + Power Automate
-  Entity: ethi_ssirequestportal (ethi_ssirequestportals)
-
-  v2 Changes:
-    - Lookups (countries, provinces) rendered server-side via Liquid fetchxml
-    - No anonymous Read table permissions required
-    - Record creation via Power Automate flow (no anonymous Create)
-    - Language toggle preserves form state via sessionStorage
+  SSI REQUEST — SINGLE PAGE FORM (Proof of Concept v2)
+  ============================================================================
+  
+  FILE:         ssi-request-template.html
+  TYPE:         Liquid Web Template (Power Pages)
+  ENTITY:       ethi_ssirequestportal (plural: ethi_ssirequestportals)
+  LAST UPDATED: 2026-02-25
+  
+  ============================================================================
+  ARCHITECTURE OVERVIEW
+  ============================================================================
+  
+  This template implements a 5-step SSI (Ship Sanitation Inspection) Request
+  form as a single HTML page. All five steps exist in the DOM simultaneously
+  as <fieldset> elements; JavaScript toggles visibility via the .step-hidden
+  class. This eliminates Power Pages' native multistep form engine and all
+  its associated interference (partial postbacks, validator injection, ARIA
+  attribute stripping, synchronous input clearing).
+  
+  ┌────────────────────────────────────────────────────────────────────────┐
+  │  RENDERING PIPELINE                                                    │
+  │                                                                        │
+  │  1. User requests /en/ssi-request/ or /fr/demande-ssi/                │
+  │  2. Power Pages resolves the Web Page → finds this Web Template       │
+  │  3. Liquid engine executes server-side:                                │
+  │     a. Detects language from webpage.adx_webpage_language              │
+  │     b. Runs {% fetchxml %} queries against Dataverse                  │
+  │     c. Renders all {% if is_fr %} blocks                              │
+  │     d. Populates <select> options from query results                  │
+  │  4. Fully-rendered HTML sent to browser (no AJAX needed for lookups)  │
+  │  5. WET-BOEW initializes wb-frmvld (validation framework)            │
+  │  6. ssi-request.js initializes step navigation + conditional logic    │
+  └────────────────────────────────────────────────────────────────────────┘
+  
+  ============================================================================
+  BILINGUAL STRATEGY
+  ============================================================================
+  
+  Power Pages uses paired Web Pages for bilingual content:
+    - /en/ssi-request/     → English page (lang="en")
+    - /fr/demande-ssi/     → French page  (lang="fr")
+  
+  Both pages reference THIS SAME web template. The language toggle (#wb-lng)
+  navigates between them (full page reload). The Liquid variable `is_fr`
+  drives all bilingual rendering at the server level.
+  
+  For <select> dropdowns, the option VALUE is always the Dataverse GUID
+  (language-independent), while the display TEXT is the localized name.
+  This means sessionStorage-based form state restoration after a language
+  toggle works correctly — the same GUID selects the right option on
+  both language pages.
+  
+  ============================================================================
+  SECURITY MODEL (v2)
+  ============================================================================
+  
+  v1 required anonymous users to have Read access to lookup tables and
+  Create access to the main entity via Web API. v2 eliminates this:
+  
+  - Lookups: Rendered server-side by Liquid {% fetchxml %} — no Web API
+    calls, no table permissions needed.
+  - Record creation: Handled by Power Automate flow with HTTP trigger.
+    The flow runs with elevated (service account) privileges.
+  - File uploads: Only operation requiring Web API — scoped to Update-only
+    on two specific file columns (ethi_uploadshipparticulars, ethi_existingssc).
+  - reCAPTCHA: Verified server-side by the flow (not by client posting to
+    hca_recaptchaattempts table).
+  
+  ============================================================================
+  VALIDATION STRATEGY
+  ============================================================================
+  
+  Primary validation is handled by WET-BOEW's wb-frmvld plugin, which
+  provides accessible error summaries, inline messages, and aria-live
+  announcements out of the box. The wb-frmvld wrapper div configures
+  the jQuery Validate plugin with an "ignore" selector that excludes
+  hidden step panels — so only the current visible step is validated
+  when the user clicks Next.
+  
+  Custom JS validation supplements wb-frmvld for:
+    - File size and type (wb-frmvld doesn't validate file contents)
+    - Date comparison (arrival ≤ departure)
+  
+  ============================================================================
+  DEPENDENCIES
+  ============================================================================
+  
+  Server-side:
+    - Power Pages Liquid engine
+    - Dataverse tables: ethi_country, ethi_province
+    - Site settings: SSI/FlowSubmitUrl
+    - Site markers: ssi-confirmation-en, ssi-confirmation-fr
+  
+  Client-side:
+    - WET-BOEW 4.x (loaded by CDTS via Power Pages)
+    - jQuery (bundled with WET-BOEW)
+    - wb-frmvld plugin (bundled with WET-BOEW)
+    - ssi-request.js (companion script)
+    - ssi-request.css (companion stylesheet)
+    - Google reCAPTCHA v3 (loaded externally)
+  
   ============================================================================ -->
+
+
+<!-- ========================================================================
+     LANGUAGE DETECTION
+     ========================================================================
+     
+     Power Pages stores the language code on the Web Page entity's related
+     language record. We read it here and set a boolean `is_fr` that drives
+     all bilingual rendering throughout the template.
+     
+     The default fallback is 'en' (English) if the language code is missing,
+     which can happen in development environments or misconfigured pages.
+     ======================================================================== -->
 
 {% assign lang = webpage.adx_webpage_language.adx_languagecode | default: 'en' %}
 {% assign is_fr = false %}
@@ -23,9 +126,45 @@
 {% endif %}
 
 
-<!-- ======================================================================
-     SERVER-SIDE LOOKUP QUERIES (no client-side API calls, no table perms)
-     ====================================================================== -->
+<!-- ========================================================================
+     SERVER-SIDE LOOKUP QUERIES
+     ========================================================================
+     
+     These {% fetchxml %} blocks execute FetchXML queries against Dataverse
+     at render time. The results are available as Liquid collections that
+     we iterate over to populate <select> dropdowns.
+     
+     WHY SERVER-SIDE (v2) vs. CLIENT-SIDE AJAX (v1):
+     
+     1. SECURITY: No anonymous Read table permissions needed. The Liquid
+        engine runs with the portal's service account privileges, not the
+        anonymous user's permissions.
+     
+     2. PERFORMANCE: No client-side AJAX round-trips. Dropdowns arrive
+        pre-populated in the initial HTML response.
+     
+     3. BILINGUAL: The sort order uses the correct language column
+        (ethi_name for EN, ethi_namefr for FR) determined at render time.
+        No client-side language detection needed.
+     
+     4. SIMPLICITY: Eliminates ~60 lines of loadCountries() and
+        loadProvinces() JavaScript functions from v1.
+     
+     REUSE: The countries_query result set is used in THREE places:
+       - Invoice Country (Step 2)
+       - Flag in Registry (Step 3)
+       - (Could be extended to other country selects)
+     
+     The provinces_query result set is used in TWO places:
+       - Invoice Province (Step 2, conditional on Canada)
+       - Service Province (Step 4)
+     
+     FILTER: statecode=0 ensures only active (non-deactivated) records
+     are included. This is standard Dataverse practice.
+     
+     SORT: Alphabetical by the language-appropriate name column, so users
+     see options in their expected alphabetical order.
+     ======================================================================== -->
 
 {% fetchxml countries_query %}
   <fetch>
@@ -56,13 +195,24 @@
 {% endfetchxml %}
 
 
+<!-- Stylesheet: GCWeb-compatible, 44px touch targets, progress bar, responsive -->
 <link rel="stylesheet" href="/ssi-request.css" />
 
 <div class="container">
 
+  <!-- H1 — Skip-link target (id="wb-cont" is the WET standard target) -->
   <h1 id="wb-cont">{{ page_title }}</h1>
 
-  <!-- PROGRESS INDICATOR -->
+
+  <!-- ======================================================================
+       PROGRESS INDICATOR
+       ======================================================================
+       Ordered list styled as a horizontal step bar. JS manages classes:
+       - .active + aria-current="step" on current step
+       - .completed on previous steps (green checkmark via CSS)
+       - role="list" preserves list semantics on styled <ol>
+       ====================================================================== -->
+
   <nav aria-label="{% if is_fr %}Progression du formulaire{% else %}Form progress{% endif %}" class="mrgn-bttm-lg">
     <ol id="ssi-progress" class="ssi-progress-bar" role="list">
       <li id="prog-1" class="ssi-step active" aria-current="step">
@@ -88,14 +238,39 @@
     </ol>
   </nav>
 
-  <!-- FORM -->
+
+  <!-- ======================================================================
+       FORM — wb-frmvld WRAPPER
+       ======================================================================
+       
+       The "ignore" selector is CRITICAL: it tells jQuery Validate to skip
+       fields inside .step-hidden fieldsets. Without it, all 5 steps would
+       validate on every Next click or Submit. When showStep() removes
+       .step-hidden from a fieldset, its fields become eligible; when it
+       adds .step-hidden, they're excluded.
+       
+       novalidate prevents native browser validation — wb-frmvld handles it.
+       ====================================================================== -->
+
   <div class="wb-frmvld" data-wb-frmvld='{"ignore": ".step-hidden input, .step-hidden select, .step-hidden textarea"}'>
     <form id="ssi-request" novalidate>
 
-      <!-- STEP 1: Shipping Agency Information -->
+
+      <!-- ==================================================================
+           STEP 1: SHIPPING AGENCY INFORMATION (7 fields)
+           ==================================================================
+           Contact info for the requesting shipping agent.
+           No conditional logic — all fields always visible.
+           
+           Phone fields: type="tel" for mobile numeric keyboard.
+           JS strips non-digits on input event.
+           autocomplete attributes: WCAG 1.3.5 compliance.
+           ================================================================== -->
+
       <fieldset id="step-1" class="step-panel" data-step="1">
         <legend>{% if is_fr %}Étape 1 sur 5 : Informations sur l'agence maritime{% else %}Step 1 of 5: Shipping Agency Information{% endif %}</legend>
 
+        <!-- Company Name (required) -->
         <div class="form-group">
           <label for="ethi_nameofshippingagentcompany" class="required">
             <span class="field-name">{% if is_fr %}Nom de la compagnie{% else %}Company Name{% endif %}</span>
@@ -104,16 +279,19 @@
           <input type="text" id="ethi_nameofshippingagentcompany" name="ethi_nameofshippingagentcompany" class="form-control" required="required" data-rule-maxlength="100" autocomplete="organization" />
         </div>
 
+        <!-- First Name (optional) -->
         <div class="form-group">
           <label for="ethi_firstnameofshippingagentrequestingservices"><span class="field-name">{% if is_fr %}Prénom{% else %}First Name{% endif %}</span></label>
           <input type="text" id="ethi_firstnameofshippingagentrequestingservices" name="ethi_firstnameofshippingagentrequestingservices" class="form-control" data-rule-maxlength="100" autocomplete="given-name" />
         </div>
 
+        <!-- Last Name (optional) -->
         <div class="form-group">
           <label for="ethi_lastnameofshippingagentrequestingservices"><span class="field-name">{% if is_fr %}Nom de famille{% else %}Last Name{% endif %}</span></label>
           <input type="text" id="ethi_lastnameofshippingagentrequestingservices" name="ethi_lastnameofshippingagentrequestingservices" class="form-control" data-rule-maxlength="100" autocomplete="family-name" />
         </div>
 
+        <!-- Office Phone (required, 10-digit pattern, data-msg overrides jQuery Validate default) -->
         <div class="form-group">
           <label for="ethi_organizationphone" class="required">
             <span class="field-name">{% if is_fr %}Téléphone du bureau{% else %}Office Phone{% endif %}</span>
@@ -123,16 +301,19 @@
           <span class="help-block">{% if is_fr %}10 chiffres, sans espaces ni tirets{% else %}10 digits, no spaces or dashes{% endif %}</span>
         </div>
 
+        <!-- Extension (optional, 1-6 digits) -->
         <div class="form-group">
           <label for="ethi_organizationphoneextension"><span class="field-name">{% if is_fr %}Poste{% else %}Extension{% endif %}</span></label>
           <input type="text" id="ethi_organizationphoneextension" name="ethi_organizationphoneextension" class="form-control" pattern="[0-9]{1,6}" data-msg="{% if is_fr %}Veuillez entrer un poste valide (1-6 chiffres){% else %}Please enter a valid extension (1-6 digits){% endif %}" autocomplete="tel-extension" />
         </div>
 
+        <!-- Secondary Phone (optional, 10 digits) -->
         <div class="form-group">
           <label for="ethi_secondaryphone"><span class="field-name">{% if is_fr %}Téléphone secondaire{% else %}Secondary Phone{% endif %}</span></label>
           <input type="tel" id="ethi_secondaryphone" name="ethi_secondaryphone" class="form-control" pattern="[0-9]{10}" data-msg="{% if is_fr %}Veuillez entrer un numéro de téléphone à 10 chiffres{% else %}Please enter a 10-digit phone number{% endif %}" autocomplete="tel" />
         </div>
 
+        <!-- Organization Email (required, type="email" gives built-in bilingual validation) -->
         <div class="form-group">
           <label for="ethi_organizationemail" class="required">
             <span class="field-name">{% if is_fr %}Courriel de l'organisation{% else %}Organization Email{% endif %}</span>
@@ -143,10 +324,27 @@
       </fieldset>
 
 
-      <!-- STEP 2: Invoice Information -->
+      <!-- ==================================================================
+           STEP 2: INVOICE INFORMATION (~15 fields, conditional)
+           ==================================================================
+           
+           TWO-LEVEL CONDITIONAL LOGIC:
+           
+           Level 1 — CCG Radio:
+             Yes → #invoice-section hidden, all required attrs removed
+             No  → #invoice-section shown, required attrs restored
+           
+           Level 2 — Country Select (inside invoice section):
+             Canada    → Province dropdown + Postal Code (CA validation)
+             Not Canada → State text input + ZIP Code text input
+           
+           Managed by initCCGToggle() and initCountryToggle() in JS.
+           ================================================================== -->
+
       <fieldset id="step-2" class="step-panel step-hidden" data-step="2">
         <legend>{% if is_fr %}Étape 2 sur 5 : Informations de facturation{% else %}Step 2 of 5: Invoice Information{% endif %}</legend>
 
+        <!-- CCG Radio — nested <fieldset>/<legend> for radio group accessibility -->
         <div class="form-group" id="ccg-group">
           <fieldset>
             <legend class="required"><span class="field-name">{% if is_fr %}Garde côtière canadienne{% else %}Canadian Coast Guard{% endif %}</span> <strong class="required" aria-hidden="true">({% if is_fr %}obligatoire{% else %}required{% endif %})</strong></legend>
@@ -155,6 +353,7 @@
           </fieldset>
         </div>
 
+        <!-- Invoice Section — conditionally shown when CCG = No -->
         <div id="invoice-section" class="conditional-section" style="display:none;">
 
           <div class="form-group">
@@ -162,7 +361,7 @@
             <input type="text" id="ethi_invoicingname" name="ethi_invoicingname" class="form-control" required="required" data-rule-maxlength="100" autocomplete="organization" />
           </div>
 
-          <!-- COUNTRY — Server-side populated via fetchxml -->
+          <!-- Country — fetchxml populated. GUIDs are language-independent. -->
           <div class="form-group">
             <label for="ethi_invoicecountry" class="required"><span class="field-name">{% if is_fr %}Pays{% else %}Country{% endif %}</span> <strong class="required" aria-hidden="true">({% if is_fr %}obligatoire{% else %}required{% endif %})</strong></label>
             <select id="ethi_invoicecountry" name="ethi_invoicecountry" class="form-control" required="required" autocomplete="country-name">
@@ -173,7 +372,7 @@
             </select>
           </div>
 
-          <!-- PROVINCE — Server-side populated (shown when Canada) -->
+          <!-- Province — fetchxml populated, shown when Canada selected -->
           <div class="form-group" id="invoice-province-group">
             <label for="ethi_invoiceprovince" class="required"><span class="field-name">{% if is_fr %}Province{% else %}Province{% endif %}</span> <strong class="required" aria-hidden="true">({% if is_fr %}obligatoire{% else %}required{% endif %})</strong></label>
             <select id="ethi_invoiceprovince" name="ethi_invoiceprovince" class="form-control" required="required" autocomplete="address-level1">
@@ -184,6 +383,7 @@
             </select>
           </div>
 
+          <!-- State — free text, shown when non-Canada -->
           <div class="form-group" id="invoice-state-group" style="display:none;">
             <label for="ethi_invoiceprovincestate" class="required"><span class="field-name">{% if is_fr %}Province / État{% else %}Province / State{% endif %}</span> <strong class="required" aria-hidden="true">({% if is_fr %}obligatoire{% else %}required{% endif %})</strong></label>
             <input type="text" id="ethi_invoiceprovincestate" name="ethi_invoiceprovincestate" class="form-control" required="required" data-rule-maxlength="100" autocomplete="address-level1" />
@@ -204,11 +404,13 @@
             <input type="text" id="ethi_invoiceaddressline2" name="ethi_invoiceaddressline2" class="form-control" data-rule-maxlength="100" autocomplete="address-line2" />
           </div>
 
+          <!-- Postal Code — Canada only, data-rule-postalCodeCA for WET validation -->
           <div class="form-group" id="invoice-postalcode-group">
             <label for="ethi_invoicepostalcode" class="required"><span class="field-name">{% if is_fr %}Code postal{% else %}Postal Code{% endif %}</span> <strong class="required" aria-hidden="true">({% if is_fr %}obligatoire{% else %}required{% endif %})</strong></label>
             <input type="text" id="ethi_invoicepostalcode" name="ethi_invoicepostalcode" class="form-control" required="required" data-rule-postalCodeCA="true" data-msg="{% if is_fr %}Veuillez entrer un code postal canadien valide (ex: A1A 1A1){% else %}Please enter a valid Canadian postal code (e.g. A1A 1A1){% endif %}" autocomplete="postal-code" />
           </div>
 
+          <!-- ZIP Code — non-Canada, no format validation (international variety) -->
           <div class="form-group" id="invoice-zipcode-group" style="display:none;">
             <label for="ethi_invoicepostalcodezipcode" class="required"><span class="field-name">{% if is_fr %}Code postal / Code ZIP{% else %}Postal Code / ZIP Code{% endif %}</span> <strong class="required" aria-hidden="true">({% if is_fr %}obligatoire{% else %}required{% endif %})</strong></label>
             <input type="text" id="ethi_invoicepostalcodezipcode" name="ethi_invoicepostalcodezipcode" class="form-control" required="required" data-rule-maxlength="20" autocomplete="postal-code" />
@@ -233,7 +435,19 @@
       </fieldset>
 
 
-      <!-- STEP 3: Vessel Information -->
+      <!-- ==================================================================
+           STEP 3: VESSEL INFORMATION (~14 fields, file uploads)
+           ==================================================================
+           
+           CONDITIONAL: Other Registry Flag text field shown when
+           Flag in Registry select = GUID_OTHER_REGISTRY.
+           
+           FILE UPLOADS: Uploaded AFTER record creation via separate PUT
+           calls to Dataverse file columns. validateFiles() in JS checks
+           size/type. Files can't be restored after language toggle
+           (browser security) — JS shows warning with previous filename.
+           ================================================================== -->
+
       <fieldset id="step-3" class="step-panel step-hidden" data-step="3">
         <legend>{% if is_fr %}Étape 3 sur 5 : Informations sur le navire{% else %}Step 3 of 5: Vessel Information{% endif %}</legend>
 
@@ -242,11 +456,13 @@
           <input type="text" id="ethi_shipname" name="ethi_shipname" class="form-control" required="required" data-rule-maxlength="100" />
         </div>
 
+        <!-- Vessel Name — separate from Ship Name per business requirements -->
         <div class="form-group">
           <label for="ethi_vesselname" class="required"><span class="field-name">{% if is_fr %}Nom du vaisseau{% else %}Vessel Name{% endif %}</span> <strong class="required" aria-hidden="true">({% if is_fr %}obligatoire{% else %}required{% endif %})</strong></label>
           <input type="text" id="ethi_vesselname" name="ethi_vesselname" class="form-control" required="required" data-rule-maxlength="100" />
         </div>
 
+        <!-- IMO Number — 7-8 digit International Maritime Organization identifier -->
         <div class="form-group">
           <label for="ethi_imoregistrationnumber" class="required"><span class="field-name">{% if is_fr %}Numéro d'enregistrement OMI{% else %}IMO Registration Number{% endif %}</span> <strong class="required" aria-hidden="true">({% if is_fr %}obligatoire{% else %}required{% endif %})</strong></label>
           <input type="text" id="ethi_imoregistrationnumber" name="ethi_imoregistrationnumber" class="form-control" required="required" pattern="[0-9]{7,8}" data-msg="{% if is_fr %}Veuillez entrer un numéro OMI valide (7-8 chiffres){% else %}Please enter a valid IMO number (7-8 digits){% endif %}" />
@@ -282,7 +498,8 @@
           <input type="text" id="ethi_shipowner" name="ethi_shipowner" class="form-control" required="required" data-rule-maxlength="100" />
         </div>
 
-        <!-- FLAG IN REGISTRY — Server-side populated (same countries query) -->
+        <!-- Flag in Registry — fetchxml countries. When "Other" GUID selected,
+             shows #other-registry-group below. -->
         <div class="form-group">
           <label for="ethi_flaginregistry" class="required"><span class="field-name">{% if is_fr %}Pavillon d'immatriculation{% else %}Flag in Registry{% endif %}</span> <strong class="required" aria-hidden="true">({% if is_fr %}obligatoire{% else %}required{% endif %})</strong></label>
           <select id="ethi_flaginregistry" name="ethi_flaginregistry" class="form-control" required="required">
@@ -298,12 +515,14 @@
           <input type="text" id="ethi_otherregistryflag" name="ethi_otherregistryflag" class="form-control" required="required" data-rule-maxlength="100" />
         </div>
 
+        <!-- File: Ship Particulars (required). accept is UI hint only — JS validates. -->
         <div class="form-group">
           <label for="ethi_uploadshipparticulars" class="required"><span class="field-name">{% if is_fr %}Téléverser les particularités du navire{% else %}Upload Ship Particulars{% endif %}</span> <strong class="required" aria-hidden="true">({% if is_fr %}obligatoire{% else %}required{% endif %})</strong></label>
           <input type="file" id="ethi_uploadshipparticulars" name="ethi_uploadshipparticulars" class="form-control" required="required" accept=".pdf,.jpg,.png,.gif" aria-describedby="file-hint-particulars" />
           <span class="help-block" id="file-hint-particulars">{% if is_fr %}Formats acceptés : PDF, JPG, PNG, GIF. Taille max : 4 Mo.{% else %}Accepted formats: PDF, JPG, PNG, GIF. Max size: 4 MB.{% endif %}</span>
         </div>
 
+        <!-- File: Existing SSC (optional) -->
         <div class="form-group">
           <label for="ethi_existingssc"><span class="field-name">{% if is_fr %}CSN existant{% else %}Existing SSC{% endif %}</span></label>
           <input type="file" id="ethi_existingssc" name="ethi_existingssc" class="form-control" accept=".pdf,.jpg,.png,.gif" aria-describedby="file-hint-ssc" />
@@ -312,11 +531,19 @@
       </fieldset>
 
 
-      <!-- STEP 4: Service Information -->
+      <!-- ==================================================================
+           STEP 4: SERVICE INFORMATION (~10 fields, date comparison)
+           ==================================================================
+           
+           No conditional logic. Custom validation: arrival ≤ departure.
+           Date inputs use type="date" for native pickers.
+           wb-inv class hides format hints visually but keeps for SR.
+           ================================================================== -->
+
       <fieldset id="step-4" class="step-panel step-hidden" data-step="4">
         <legend>{% if is_fr %}Étape 4 sur 5 : Informations sur le service{% else %}Step 4 of 5: Service Information{% endif %}</legend>
 
-        <!-- SERVICE PROVINCE — Server-side populated -->
+        <!-- Service Province — fetchxml populated (same provinces_query) -->
         <div class="form-group">
           <label for="ethi_serviceprovince" class="required"><span class="field-name">{% if is_fr %}Province de service{% else %}Service Province{% endif %}</span> <strong class="required" aria-hidden="true">({% if is_fr %}obligatoire{% else %}required{% endif %})</strong></label>
           <select id="ethi_serviceprovince" name="ethi_serviceprovince" class="form-control" required="required">
@@ -342,6 +569,7 @@
           <input type="text" id="ethi_dock" name="ethi_dock" class="form-control" data-rule-maxlength="100" />
         </div>
 
+        <!-- Arrival/Departure — cross-field validation by validateDateComparison() -->
         <div class="form-group">
           <label for="ethi_vesselexpectedarrivaldate"><span class="field-name">{% if is_fr %}Date d'arrivée prévue{% else %}Expected Arrival Date{% endif %}</span></label>
           <input type="date" id="ethi_vesselexpectedarrivaldate" name="ethi_vesselexpectedarrivaldate" class="form-control" aria-describedby="arrival-hint" />
@@ -376,12 +604,19 @@
       </fieldset>
 
 
-      <!-- STEP 5: Review & Submit -->
+      <!-- ==================================================================
+           STEP 5: REVIEW & SUBMIT
+           ==================================================================
+           generateReviewSummary() populates #review-content with tables.
+           reCAPTCHA v3 invisible badge renders in #recaptcha-widget.
+           Submit flow: reCAPTCHA → Power Automate → file uploads → redirect.
+           ================================================================== -->
+
       <fieldset id="step-5" class="step-panel step-hidden" data-step="5">
         <legend>{% if is_fr %}Étape 5 sur 5 : Révision et soumission{% else %}Step 5 of 5: Review & Submit{% endif %}</legend>
         <div id="review-summary" class="well">
           <p>{% if is_fr %}Veuillez vérifier les informations ci-dessous avant de soumettre votre demande.{% else %}Please review the information below before submitting your request.{% endif %}</p>
-          <div id="review-content"></div>
+          <div id="review-content"><!-- JS-populated review tables --></div>
         </div>
         <div id="recaptcha-container" class="mrgn-tp-lg mrgn-bttm-lg">
           <div id="recaptcha-widget"></div>
@@ -389,7 +624,14 @@
       </fieldset>
 
 
-      <!-- NAVIGATION -->
+      <!-- ==================================================================
+           NAVIGATION BUTTONS
+           ==================================================================
+           btn-prev: Hidden on Step 1. type="button" prevents submit.
+           btn-next: Hidden on Step 5. Validates before advancing.
+           btn-submit: Visible only on Step 5. Disabled during submission.
+           ================================================================== -->
+
       <div class="step-nav mrgn-tp-lg clearfix">
         <button type="button" id="btn-prev" class="btn btn-default pull-left" style="display:none;" aria-label="{% if is_fr %}Étape précédente{% else %}Previous step{% endif %}">
           <span class="glyphicon glyphicon-chevron-left" aria-hidden="true"></span> {% if is_fr %}Précédent{% else %}Previous{% endif %}
@@ -400,6 +642,7 @@
         <button type="submit" id="btn-submit" class="btn btn-success pull-right" style="display:none;">{% if is_fr %}Soumettre{% else %}Submit{% endif %}</button>
       </div>
 
+      <!-- Hidden: submit timestamp (JS-populated) + CSRF token (Liquid-populated) -->
       <input type="hidden" name="ethi_submittimeutc" id="ethi_submittimeutc" />
       <input type="hidden" name="__RequestVerificationToken" value="{{ request_verification_token }}" />
     </form>
@@ -407,7 +650,20 @@
 
 </div>
 
-<!-- Config from Liquid — consumed by JS -->
+
+<!-- ========================================================================
+     CONFIGURATION — Liquid → JavaScript Bridge
+     ========================================================================
+     Passes server-side values to JS via window.SSI_CONFIG.
+     This is the ONLY place where Liquid appears in a <script> context.
+     
+     flowUrl:      Power Automate HTTP trigger URL (site setting)
+     lang:         'en' or 'fr'
+     isFr:         Boolean for JS-side language checks
+     confirmUrlEn: Post-submit redirect for English (site marker)
+     confirmUrlFr: Post-submit redirect for French (site marker)
+     ======================================================================== -->
+
 <script>
   window.SSI_CONFIG = {
     flowUrl: '{{ sitesettings["SSI/FlowSubmitUrl"] }}',
