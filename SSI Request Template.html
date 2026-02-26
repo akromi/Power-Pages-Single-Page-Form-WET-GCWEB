@@ -1,0 +1,420 @@
+<!-- ============================================================================
+  SSI Request - Single Page Form (Proof of Concept v2)
+  Web Template: ssi-request-template
+
+  Architecture: Power Pages empty shell + Liquid + wb-frmvld + Power Automate
+  Entity: ethi_ssirequestportal (ethi_ssirequestportals)
+
+  v2 Changes:
+    - Lookups (countries, provinces) rendered server-side via Liquid fetchxml
+    - No anonymous Read table permissions required
+    - Record creation via Power Automate flow (no anonymous Create)
+    - Language toggle preserves form state via sessionStorage
+  ============================================================================ -->
+
+{% assign lang = webpage.adx_webpage_language.adx_languagecode | default: 'en' %}
+{% assign is_fr = false %}
+{% if lang == 'fr' %}{% assign is_fr = true %}{% endif %}
+
+{% if is_fr %}
+  {% assign page_title = 'Demande d\'inspection sanitaire de navire' %}
+{% else %}
+  {% assign page_title = 'Ship Sanitation Inspection Request' %}
+{% endif %}
+
+
+<!-- ======================================================================
+     SERVER-SIDE LOOKUP QUERIES (no client-side API calls, no table perms)
+     ====================================================================== -->
+
+{% fetchxml countries_query %}
+  <fetch>
+    <entity name="ethi_country">
+      <attribute name="ethi_countryid" />
+      <attribute name="ethi_name" />
+      <attribute name="ethi_namefr" />
+      <filter>
+        <condition attribute="statecode" operator="eq" value="0" />
+      </filter>
+      <order attribute="{% if is_fr %}ethi_namefr{% else %}ethi_name{% endif %}" />
+    </entity>
+  </fetch>
+{% endfetchxml %}
+
+{% fetchxml provinces_query %}
+  <fetch>
+    <entity name="ethi_province">
+      <attribute name="ethi_provinceid" />
+      <attribute name="ethi_name" />
+      <attribute name="ethi_namefr" />
+      <filter>
+        <condition attribute="statecode" operator="eq" value="0" />
+      </filter>
+      <order attribute="{% if is_fr %}ethi_namefr{% else %}ethi_name{% endif %}" />
+    </entity>
+  </fetch>
+{% endfetchxml %}
+
+
+<link rel="stylesheet" href="/ssi-request.css" />
+
+<div class="container">
+
+  <h1 id="wb-cont">{{ page_title }}</h1>
+
+  <!-- PROGRESS INDICATOR -->
+  <nav aria-label="{% if is_fr %}Progression du formulaire{% else %}Form progress{% endif %}" class="mrgn-bttm-lg">
+    <ol id="ssi-progress" class="ssi-progress-bar" role="list">
+      <li id="prog-1" class="ssi-step active" aria-current="step">
+        <span class="ssi-step-num" aria-hidden="true">1</span>
+        <span class="ssi-step-label">{% if is_fr %}Agence maritime{% else %}Shipping Agency{% endif %}</span>
+      </li>
+      <li id="prog-2" class="ssi-step">
+        <span class="ssi-step-num" aria-hidden="true">2</span>
+        <span class="ssi-step-label">{% if is_fr %}Facturation{% else %}Invoicing{% endif %}</span>
+      </li>
+      <li id="prog-3" class="ssi-step">
+        <span class="ssi-step-num" aria-hidden="true">3</span>
+        <span class="ssi-step-label">{% if is_fr %}Navire{% else %}Vessel{% endif %}</span>
+      </li>
+      <li id="prog-4" class="ssi-step">
+        <span class="ssi-step-num" aria-hidden="true">4</span>
+        <span class="ssi-step-label">{% if is_fr %}Service{% else %}Service{% endif %}</span>
+      </li>
+      <li id="prog-5" class="ssi-step">
+        <span class="ssi-step-num" aria-hidden="true">5</span>
+        <span class="ssi-step-label">{% if is_fr %}Révision{% else %}Review{% endif %}</span>
+      </li>
+    </ol>
+  </nav>
+
+  <!-- FORM -->
+  <div class="wb-frmvld" data-wb-frmvld='{"ignore": ".step-hidden input, .step-hidden select, .step-hidden textarea"}'>
+    <form id="ssi-request" novalidate>
+
+      <!-- STEP 1: Shipping Agency Information -->
+      <fieldset id="step-1" class="step-panel" data-step="1">
+        <legend>{% if is_fr %}Étape 1 sur 5 : Informations sur l'agence maritime{% else %}Step 1 of 5: Shipping Agency Information{% endif %}</legend>
+
+        <div class="form-group">
+          <label for="ethi_nameofshippingagentcompany" class="required">
+            <span class="field-name">{% if is_fr %}Nom de la compagnie{% else %}Company Name{% endif %}</span>
+            <strong class="required" aria-hidden="true">({% if is_fr %}obligatoire{% else %}required{% endif %})</strong>
+          </label>
+          <input type="text" id="ethi_nameofshippingagentcompany" name="ethi_nameofshippingagentcompany" class="form-control" required="required" data-rule-maxlength="100" autocomplete="organization" />
+        </div>
+
+        <div class="form-group">
+          <label for="ethi_firstnameofshippingagentrequestingservices"><span class="field-name">{% if is_fr %}Prénom{% else %}First Name{% endif %}</span></label>
+          <input type="text" id="ethi_firstnameofshippingagentrequestingservices" name="ethi_firstnameofshippingagentrequestingservices" class="form-control" data-rule-maxlength="100" autocomplete="given-name" />
+        </div>
+
+        <div class="form-group">
+          <label for="ethi_lastnameofshippingagentrequestingservices"><span class="field-name">{% if is_fr %}Nom de famille{% else %}Last Name{% endif %}</span></label>
+          <input type="text" id="ethi_lastnameofshippingagentrequestingservices" name="ethi_lastnameofshippingagentrequestingservices" class="form-control" data-rule-maxlength="100" autocomplete="family-name" />
+        </div>
+
+        <div class="form-group">
+          <label for="ethi_organizationphone" class="required">
+            <span class="field-name">{% if is_fr %}Téléphone du bureau{% else %}Office Phone{% endif %}</span>
+            <strong class="required" aria-hidden="true">({% if is_fr %}obligatoire{% else %}required{% endif %})</strong>
+          </label>
+          <input type="tel" id="ethi_organizationphone" name="ethi_organizationphone" class="form-control" required="required" pattern="[0-9]{10}" data-msg="{% if is_fr %}Veuillez entrer un numéro de téléphone à 10 chiffres{% else %}Please enter a 10-digit phone number{% endif %}" autocomplete="tel" />
+          <span class="help-block">{% if is_fr %}10 chiffres, sans espaces ni tirets{% else %}10 digits, no spaces or dashes{% endif %}</span>
+        </div>
+
+        <div class="form-group">
+          <label for="ethi_organizationphoneextension"><span class="field-name">{% if is_fr %}Poste{% else %}Extension{% endif %}</span></label>
+          <input type="text" id="ethi_organizationphoneextension" name="ethi_organizationphoneextension" class="form-control" pattern="[0-9]{1,6}" data-msg="{% if is_fr %}Veuillez entrer un poste valide (1-6 chiffres){% else %}Please enter a valid extension (1-6 digits){% endif %}" autocomplete="tel-extension" />
+        </div>
+
+        <div class="form-group">
+          <label for="ethi_secondaryphone"><span class="field-name">{% if is_fr %}Téléphone secondaire{% else %}Secondary Phone{% endif %}</span></label>
+          <input type="tel" id="ethi_secondaryphone" name="ethi_secondaryphone" class="form-control" pattern="[0-9]{10}" data-msg="{% if is_fr %}Veuillez entrer un numéro de téléphone à 10 chiffres{% else %}Please enter a 10-digit phone number{% endif %}" autocomplete="tel" />
+        </div>
+
+        <div class="form-group">
+          <label for="ethi_organizationemail" class="required">
+            <span class="field-name">{% if is_fr %}Courriel de l'organisation{% else %}Organization Email{% endif %}</span>
+            <strong class="required" aria-hidden="true">({% if is_fr %}obligatoire{% else %}required{% endif %})</strong>
+          </label>
+          <input type="email" id="ethi_organizationemail" name="ethi_organizationemail" class="form-control" required="required" autocomplete="email" />
+        </div>
+      </fieldset>
+
+
+      <!-- STEP 2: Invoice Information -->
+      <fieldset id="step-2" class="step-panel step-hidden" data-step="2">
+        <legend>{% if is_fr %}Étape 2 sur 5 : Informations de facturation{% else %}Step 2 of 5: Invoice Information{% endif %}</legend>
+
+        <div class="form-group" id="ccg-group">
+          <fieldset>
+            <legend class="required"><span class="field-name">{% if is_fr %}Garde côtière canadienne{% else %}Canadian Coast Guard{% endif %}</span> <strong class="required" aria-hidden="true">({% if is_fr %}obligatoire{% else %}required{% endif %})</strong></legend>
+            <div class="radio"><label for="ethi_canadiancoastguard_yes"><input type="radio" id="ethi_canadiancoastguard_yes" name="ethi_canadiancoastguard" value="true" required="required" /> {% if is_fr %}Oui{% else %}Yes{% endif %}</label></div>
+            <div class="radio"><label for="ethi_canadiancoastguard_no"><input type="radio" id="ethi_canadiancoastguard_no" name="ethi_canadiancoastguard" value="false" /> {% if is_fr %}Non{% else %}No{% endif %}</label></div>
+          </fieldset>
+        </div>
+
+        <div id="invoice-section" class="conditional-section" style="display:none;">
+
+          <div class="form-group">
+            <label for="ethi_invoicingname" class="required"><span class="field-name">{% if is_fr %}Nom pour la facturation{% else %}Invoicing Name{% endif %}</span> <strong class="required" aria-hidden="true">({% if is_fr %}obligatoire{% else %}required{% endif %})</strong></label>
+            <input type="text" id="ethi_invoicingname" name="ethi_invoicingname" class="form-control" required="required" data-rule-maxlength="100" autocomplete="organization" />
+          </div>
+
+          <!-- COUNTRY — Server-side populated via fetchxml -->
+          <div class="form-group">
+            <label for="ethi_invoicecountry" class="required"><span class="field-name">{% if is_fr %}Pays{% else %}Country{% endif %}</span> <strong class="required" aria-hidden="true">({% if is_fr %}obligatoire{% else %}required{% endif %})</strong></label>
+            <select id="ethi_invoicecountry" name="ethi_invoicecountry" class="form-control" required="required" autocomplete="country-name">
+              <option value="">{% if is_fr %}Sélectionnez un pays{% else %}Select a country{% endif %}</option>
+              {% for country in countries_query.results.entities %}
+                <option value="{{ country.ethi_countryid }}">{% if is_fr %}{{ country.ethi_namefr | default: country.ethi_name }}{% else %}{{ country.ethi_name }}{% endif %}</option>
+              {% endfor %}
+            </select>
+          </div>
+
+          <!-- PROVINCE — Server-side populated (shown when Canada) -->
+          <div class="form-group" id="invoice-province-group">
+            <label for="ethi_invoiceprovince" class="required"><span class="field-name">{% if is_fr %}Province{% else %}Province{% endif %}</span> <strong class="required" aria-hidden="true">({% if is_fr %}obligatoire{% else %}required{% endif %})</strong></label>
+            <select id="ethi_invoiceprovince" name="ethi_invoiceprovince" class="form-control" required="required" autocomplete="address-level1">
+              <option value="">{% if is_fr %}Sélectionnez une province{% else %}Select a province{% endif %}</option>
+              {% for prov in provinces_query.results.entities %}
+                <option value="{{ prov.ethi_provinceid }}">{% if is_fr %}{{ prov.ethi_namefr | default: prov.ethi_name }}{% else %}{{ prov.ethi_name }}{% endif %}</option>
+              {% endfor %}
+            </select>
+          </div>
+
+          <div class="form-group" id="invoice-state-group" style="display:none;">
+            <label for="ethi_invoiceprovincestate" class="required"><span class="field-name">{% if is_fr %}Province / État{% else %}Province / State{% endif %}</span> <strong class="required" aria-hidden="true">({% if is_fr %}obligatoire{% else %}required{% endif %})</strong></label>
+            <input type="text" id="ethi_invoiceprovincestate" name="ethi_invoiceprovincestate" class="form-control" required="required" data-rule-maxlength="100" autocomplete="address-level1" />
+          </div>
+
+          <div class="form-group">
+            <label for="ethi_invoicecity" class="required"><span class="field-name">{% if is_fr %}Ville{% else %}City{% endif %}</span> <strong class="required" aria-hidden="true">({% if is_fr %}obligatoire{% else %}required{% endif %})</strong></label>
+            <input type="text" id="ethi_invoicecity" name="ethi_invoicecity" class="form-control" required="required" data-rule-maxlength="100" autocomplete="address-level2" />
+          </div>
+
+          <div class="form-group">
+            <label for="ethi_invoiceaddressline1" class="required"><span class="field-name">{% if is_fr %}Adresse ligne 1{% else %}Address Line 1{% endif %}</span> <strong class="required" aria-hidden="true">({% if is_fr %}obligatoire{% else %}required{% endif %})</strong></label>
+            <input type="text" id="ethi_invoiceaddressline1" name="ethi_invoiceaddressline1" class="form-control" required="required" data-rule-maxlength="100" autocomplete="address-line1" />
+          </div>
+
+          <div class="form-group">
+            <label for="ethi_invoiceaddressline2"><span class="field-name">{% if is_fr %}Adresse ligne 2{% else %}Address Line 2{% endif %}</span></label>
+            <input type="text" id="ethi_invoiceaddressline2" name="ethi_invoiceaddressline2" class="form-control" data-rule-maxlength="100" autocomplete="address-line2" />
+          </div>
+
+          <div class="form-group" id="invoice-postalcode-group">
+            <label for="ethi_invoicepostalcode" class="required"><span class="field-name">{% if is_fr %}Code postal{% else %}Postal Code{% endif %}</span> <strong class="required" aria-hidden="true">({% if is_fr %}obligatoire{% else %}required{% endif %})</strong></label>
+            <input type="text" id="ethi_invoicepostalcode" name="ethi_invoicepostalcode" class="form-control" required="required" data-rule-postalCodeCA="true" data-msg="{% if is_fr %}Veuillez entrer un code postal canadien valide (ex: A1A 1A1){% else %}Please enter a valid Canadian postal code (e.g. A1A 1A1){% endif %}" autocomplete="postal-code" />
+          </div>
+
+          <div class="form-group" id="invoice-zipcode-group" style="display:none;">
+            <label for="ethi_invoicepostalcodezipcode" class="required"><span class="field-name">{% if is_fr %}Code postal / Code ZIP{% else %}Postal Code / ZIP Code{% endif %}</span> <strong class="required" aria-hidden="true">({% if is_fr %}obligatoire{% else %}required{% endif %})</strong></label>
+            <input type="text" id="ethi_invoicepostalcodezipcode" name="ethi_invoicepostalcodezipcode" class="form-control" required="required" data-rule-maxlength="20" autocomplete="postal-code" />
+          </div>
+
+          <div class="form-group">
+            <label for="ethi_businessnumber"><span class="field-name">{% if is_fr %}Numéro d'entreprise{% else %}Business Number{% endif %}</span></label>
+            <input type="text" id="ethi_businessnumber" name="ethi_businessnumber" class="form-control" pattern="[0-9]{9}" data-msg="{% if is_fr %}Veuillez entrer un numéro d'entreprise à 9 chiffres{% else %}Please enter a 9-digit business number{% endif %}" />
+          </div>
+
+          <div class="form-group">
+            <label for="ethi_isorganizationnumber"><span class="field-name">{% if is_fr %}Numéro ISO{% else %}ISO Number{% endif %}</span></label>
+            <input type="text" id="ethi_isorganizationnumber" name="ethi_isorganizationnumber" class="form-control" data-rule-maxlength="100" />
+          </div>
+
+          <div class="form-group">
+            <label for="ethi_isreferencenumber"><span class="field-name">{% if is_fr %}Numéro de référence IS{% else %}IS Reference Number{% endif %}</span></label>
+            <input type="text" id="ethi_isreferencenumber" name="ethi_isreferencenumber" class="form-control" data-rule-maxlength="100" />
+          </div>
+
+        </div><!-- /invoice-section -->
+      </fieldset>
+
+
+      <!-- STEP 3: Vessel Information -->
+      <fieldset id="step-3" class="step-panel step-hidden" data-step="3">
+        <legend>{% if is_fr %}Étape 3 sur 5 : Informations sur le navire{% else %}Step 3 of 5: Vessel Information{% endif %}</legend>
+
+        <div class="form-group">
+          <label for="ethi_shipname" class="required"><span class="field-name">{% if is_fr %}Nom du navire{% else %}Ship Name{% endif %}</span> <strong class="required" aria-hidden="true">({% if is_fr %}obligatoire{% else %}required{% endif %})</strong></label>
+          <input type="text" id="ethi_shipname" name="ethi_shipname" class="form-control" required="required" data-rule-maxlength="100" />
+        </div>
+
+        <div class="form-group">
+          <label for="ethi_vesselname" class="required"><span class="field-name">{% if is_fr %}Nom du vaisseau{% else %}Vessel Name{% endif %}</span> <strong class="required" aria-hidden="true">({% if is_fr %}obligatoire{% else %}required{% endif %})</strong></label>
+          <input type="text" id="ethi_vesselname" name="ethi_vesselname" class="form-control" required="required" data-rule-maxlength="100" />
+        </div>
+
+        <div class="form-group">
+          <label for="ethi_imoregistrationnumber" class="required"><span class="field-name">{% if is_fr %}Numéro d'enregistrement OMI{% else %}IMO Registration Number{% endif %}</span> <strong class="required" aria-hidden="true">({% if is_fr %}obligatoire{% else %}required{% endif %})</strong></label>
+          <input type="text" id="ethi_imoregistrationnumber" name="ethi_imoregistrationnumber" class="form-control" required="required" pattern="[0-9]{7,8}" data-msg="{% if is_fr %}Veuillez entrer un numéro OMI valide (7-8 chiffres){% else %}Please enter a valid IMO number (7-8 digits){% endif %}" />
+        </div>
+
+        <div class="form-group">
+          <label for="ethi_callsign" class="required"><span class="field-name">{% if is_fr %}Indicatif d'appel{% else %}Call Sign{% endif %}</span> <strong class="required" aria-hidden="true">({% if is_fr %}obligatoire{% else %}required{% endif %})</strong></label>
+          <input type="text" id="ethi_callsign" name="ethi_callsign" class="form-control" required="required" data-rule-maxlength="100" />
+        </div>
+
+        <div class="form-group">
+          <label for="ethi_portofregistry" class="required"><span class="field-name">{% if is_fr %}Port d'immatriculation{% else %}Port of Registry{% endif %}</span> <strong class="required" aria-hidden="true">({% if is_fr %}obligatoire{% else %}required{% endif %})</strong></label>
+          <input type="text" id="ethi_portofregistry" name="ethi_portofregistry" class="form-control" required="required" data-rule-maxlength="100" />
+        </div>
+
+        <div class="form-group">
+          <label for="ethi_nettonnage" class="required"><span class="field-name">{% if is_fr %}Jauge nette{% else %}Net Tonnage{% endif %}</span> <strong class="required" aria-hidden="true">({% if is_fr %}obligatoire{% else %}required{% endif %})</strong></label>
+          <input type="number" id="ethi_nettonnage" name="ethi_nettonnage" class="form-control" required="required" min="1" max="9999999" data-msg="{% if is_fr %}Veuillez entrer un nombre positif (max 7 chiffres){% else %}Please enter a positive number (max 7 digits){% endif %}" />
+        </div>
+
+        <div class="form-group">
+          <label for="ethi_numberofholds"><span class="field-name">{% if is_fr %}Nombre de cales{% else %}Number of Holds{% endif %}</span></label>
+          <input type="number" id="ethi_numberofholds" name="ethi_numberofholds" class="form-control" min="0" max="9999999" />
+        </div>
+
+        <div class="form-group">
+          <label for="ethi_typeofcargo"><span class="field-name">{% if is_fr %}Type de cargaison{% else %}Type of Cargo{% endif %}</span></label>
+          <input type="text" id="ethi_typeofcargo" name="ethi_typeofcargo" class="form-control" data-rule-maxlength="100" />
+        </div>
+
+        <div class="form-group">
+          <label for="ethi_shipowner" class="required"><span class="field-name">{% if is_fr %}Propriétaire du navire{% else %}Ship Owner{% endif %}</span> <strong class="required" aria-hidden="true">({% if is_fr %}obligatoire{% else %}required{% endif %})</strong></label>
+          <input type="text" id="ethi_shipowner" name="ethi_shipowner" class="form-control" required="required" data-rule-maxlength="100" />
+        </div>
+
+        <!-- FLAG IN REGISTRY — Server-side populated (same countries query) -->
+        <div class="form-group">
+          <label for="ethi_flaginregistry" class="required"><span class="field-name">{% if is_fr %}Pavillon d'immatriculation{% else %}Flag in Registry{% endif %}</span> <strong class="required" aria-hidden="true">({% if is_fr %}obligatoire{% else %}required{% endif %})</strong></label>
+          <select id="ethi_flaginregistry" name="ethi_flaginregistry" class="form-control" required="required">
+            <option value="">{% if is_fr %}Sélectionnez un pays{% else %}Select a country{% endif %}</option>
+            {% for country in countries_query.results.entities %}
+              <option value="{{ country.ethi_countryid }}">{% if is_fr %}{{ country.ethi_namefr | default: country.ethi_name }}{% else %}{{ country.ethi_name }}{% endif %}</option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <div class="form-group" id="other-registry-group" style="display:none;">
+          <label for="ethi_otherregistryflag" class="required"><span class="field-name">{% if is_fr %}Autre pavillon d'immatriculation{% else %}Other Registry Flag{% endif %}</span> <strong class="required" aria-hidden="true">({% if is_fr %}obligatoire{% else %}required{% endif %})</strong></label>
+          <input type="text" id="ethi_otherregistryflag" name="ethi_otherregistryflag" class="form-control" required="required" data-rule-maxlength="100" />
+        </div>
+
+        <div class="form-group">
+          <label for="ethi_uploadshipparticulars" class="required"><span class="field-name">{% if is_fr %}Téléverser les particularités du navire{% else %}Upload Ship Particulars{% endif %}</span> <strong class="required" aria-hidden="true">({% if is_fr %}obligatoire{% else %}required{% endif %})</strong></label>
+          <input type="file" id="ethi_uploadshipparticulars" name="ethi_uploadshipparticulars" class="form-control" required="required" accept=".pdf,.jpg,.png,.gif" aria-describedby="file-hint-particulars" />
+          <span class="help-block" id="file-hint-particulars">{% if is_fr %}Formats acceptés : PDF, JPG, PNG, GIF. Taille max : 4 Mo.{% else %}Accepted formats: PDF, JPG, PNG, GIF. Max size: 4 MB.{% endif %}</span>
+        </div>
+
+        <div class="form-group">
+          <label for="ethi_existingssc"><span class="field-name">{% if is_fr %}CSN existant{% else %}Existing SSC{% endif %}</span></label>
+          <input type="file" id="ethi_existingssc" name="ethi_existingssc" class="form-control" accept=".pdf,.jpg,.png,.gif" aria-describedby="file-hint-ssc" />
+          <span class="help-block" id="file-hint-ssc">{% if is_fr %}Formats acceptés : PDF, JPG, PNG, GIF. Taille max : 4 Mo.{% else %}Accepted formats: PDF, JPG, PNG, GIF. Max size: 4 MB.{% endif %}</span>
+        </div>
+      </fieldset>
+
+
+      <!-- STEP 4: Service Information -->
+      <fieldset id="step-4" class="step-panel step-hidden" data-step="4">
+        <legend>{% if is_fr %}Étape 4 sur 5 : Informations sur le service{% else %}Step 4 of 5: Service Information{% endif %}</legend>
+
+        <!-- SERVICE PROVINCE — Server-side populated -->
+        <div class="form-group">
+          <label for="ethi_serviceprovince" class="required"><span class="field-name">{% if is_fr %}Province de service{% else %}Service Province{% endif %}</span> <strong class="required" aria-hidden="true">({% if is_fr %}obligatoire{% else %}required{% endif %})</strong></label>
+          <select id="ethi_serviceprovince" name="ethi_serviceprovince" class="form-control" required="required">
+            <option value="">{% if is_fr %}Sélectionnez une province{% else %}Select a province{% endif %}</option>
+            {% for prov in provinces_query.results.entities %}
+              <option value="{{ prov.ethi_provinceid }}">{% if is_fr %}{{ prov.ethi_namefr | default: prov.ethi_name }}{% else %}{{ prov.ethi_name }}{% endif %}</option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label for="ethi_servicecityname" class="required"><span class="field-name">{% if is_fr %}Ville de service{% else %}Service City{% endif %}</span> <strong class="required" aria-hidden="true">({% if is_fr %}obligatoire{% else %}required{% endif %})</strong></label>
+          <input type="text" id="ethi_servicecityname" name="ethi_servicecityname" class="form-control" required="required" data-rule-maxlength="100" />
+        </div>
+
+        <div class="form-group">
+          <label for="ethi_servicelocation" class="required"><span class="field-name">{% if is_fr %}Lieu de service{% else %}Service Location{% endif %}</span> <strong class="required" aria-hidden="true">({% if is_fr %}obligatoire{% else %}required{% endif %})</strong></label>
+          <input type="text" id="ethi_servicelocation" name="ethi_servicelocation" class="form-control" required="required" data-rule-maxlength="100" />
+        </div>
+
+        <div class="form-group">
+          <label for="ethi_dock"><span class="field-name">{% if is_fr %}Quai{% else %}Dock{% endif %}</span></label>
+          <input type="text" id="ethi_dock" name="ethi_dock" class="form-control" data-rule-maxlength="100" />
+        </div>
+
+        <div class="form-group">
+          <label for="ethi_vesselexpectedarrivaldate"><span class="field-name">{% if is_fr %}Date d'arrivée prévue{% else %}Expected Arrival Date{% endif %}</span></label>
+          <input type="date" id="ethi_vesselexpectedarrivaldate" name="ethi_vesselexpectedarrivaldate" class="form-control" aria-describedby="arrival-hint" />
+          <span class="help-block wb-inv" id="arrival-hint">{% if is_fr %}Format : AAAA-MM-JJ{% else %}Format: YYYY-MM-DD{% endif %}</span>
+        </div>
+
+        <div class="form-group">
+          <label for="ethi_vesselexpecteddeparturedate"><span class="field-name">{% if is_fr %}Date de départ prévue{% else %}Expected Departure Date{% endif %}</span></label>
+          <input type="date" id="ethi_vesselexpecteddeparturedate" name="ethi_vesselexpecteddeparturedate" class="form-control" aria-describedby="departure-hint" />
+          <span class="help-block wb-inv" id="departure-hint">{% if is_fr %}Format : AAAA-MM-JJ{% else %}Format: YYYY-MM-DD{% endif %}</span>
+        </div>
+
+        <div class="form-group">
+          <label for="ethi_previousportofcall" class="required"><span class="field-name">{% if is_fr %}Port d'escale précédent{% else %}Previous Port of Call{% endif %}</span> <strong class="required" aria-hidden="true">({% if is_fr %}obligatoire{% else %}required{% endif %})</strong></label>
+          <input type="text" id="ethi_previousportofcall" name="ethi_previousportofcall" class="form-control" required="required" data-rule-maxlength="100" />
+        </div>
+
+        <div class="form-group">
+          <label for="ethi_nextportofcall"><span class="field-name">{% if is_fr %}Prochain port d'escale{% else %}Next Port of Call{% endif %}</span></label>
+          <input type="text" id="ethi_nextportofcall" name="ethi_nextportofcall" class="form-control" data-rule-maxlength="100" />
+        </div>
+
+        <div class="form-group">
+          <label for="ethi_certificatesexpiresdate"><span class="field-name">{% if is_fr %}Date d'expiration du certificat{% else %}Certificate Expiry Date{% endif %}</span></label>
+          <input type="date" id="ethi_certificatesexpiresdate" name="ethi_certificatesexpiresdate" class="form-control" />
+        </div>
+
+        <div class="form-group">
+          <label for="ethi_additionalcomments"><span class="field-name">{% if is_fr %}Commentaires additionnels{% else %}Additional Comments{% endif %}</span></label>
+          <textarea id="ethi_additionalcomments" name="ethi_additionalcomments" class="form-control" rows="5" data-rule-maxlength="2000"></textarea>
+        </div>
+      </fieldset>
+
+
+      <!-- STEP 5: Review & Submit -->
+      <fieldset id="step-5" class="step-panel step-hidden" data-step="5">
+        <legend>{% if is_fr %}Étape 5 sur 5 : Révision et soumission{% else %}Step 5 of 5: Review & Submit{% endif %}</legend>
+        <div id="review-summary" class="well">
+          <p>{% if is_fr %}Veuillez vérifier les informations ci-dessous avant de soumettre votre demande.{% else %}Please review the information below before submitting your request.{% endif %}</p>
+          <div id="review-content"></div>
+        </div>
+        <div id="recaptcha-container" class="mrgn-tp-lg mrgn-bttm-lg">
+          <div id="recaptcha-widget"></div>
+        </div>
+      </fieldset>
+
+
+      <!-- NAVIGATION -->
+      <div class="step-nav mrgn-tp-lg clearfix">
+        <button type="button" id="btn-prev" class="btn btn-default pull-left" style="display:none;" aria-label="{% if is_fr %}Étape précédente{% else %}Previous step{% endif %}">
+          <span class="glyphicon glyphicon-chevron-left" aria-hidden="true"></span> {% if is_fr %}Précédent{% else %}Previous{% endif %}
+        </button>
+        <button type="button" id="btn-next" class="btn btn-primary pull-right" aria-label="{% if is_fr %}Étape suivante{% else %}Next step{% endif %}">
+          {% if is_fr %}Suivant{% else %}Next{% endif %} <span class="glyphicon glyphicon-chevron-right" aria-hidden="true"></span>
+        </button>
+        <button type="submit" id="btn-submit" class="btn btn-success pull-right" style="display:none;">{% if is_fr %}Soumettre{% else %}Submit{% endif %}</button>
+      </div>
+
+      <input type="hidden" name="ethi_submittimeutc" id="ethi_submittimeutc" />
+      <input type="hidden" name="__RequestVerificationToken" value="{{ request_verification_token }}" />
+    </form>
+  </div>
+
+</div>
+
+<!-- Config from Liquid — consumed by JS -->
+<script>
+  window.SSI_CONFIG = {
+    flowUrl: '{{ sitesettings["SSI/FlowSubmitUrl"] }}',
+    lang: '{{ lang }}',
+    isFr: {{ is_fr }},
+    confirmUrlEn: '{{ sitemarkers["ssi-confirmation-en"].url | default: "/en/ssi-request/confirmation/" }}',
+    confirmUrlFr: '{{ sitemarkers["ssi-confirmation-fr"].url | default: "/fr/demande-ssi/confirmation/" }}'
+  };
+</script>
+<script src="/ssi-request.js"></script>
