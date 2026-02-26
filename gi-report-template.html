@@ -1,0 +1,570 @@
+<!-- ============================================================================
+  GI REPORT — SINGLE PAGE FORM (Proof of Concept v2)
+  ============================================================================
+  
+  FILE:         gi-report-template.html
+  TYPE:         Liquid Web Template (Power Pages)
+  ENTITY:       ethi_gireport (plural: ethi_gireports)
+  LAST UPDATED: 2026-02-26
+  
+  ============================================================================
+  ARCHITECTURE OVERVIEW
+  ============================================================================
+  
+  This template implements a 5-step GI (Gastrointestinal Illness) Report
+  form as a single HTML page. All five steps exist in the DOM simultaneously
+  as <fieldset> elements; JavaScript toggles visibility via the .step-hidden
+  class. This eliminates Power Pages' native multistep form engine and all
+  its associated interference (partial postbacks, validator injection, ARIA
+  attribute stripping, synchronous input clearing).
+  
+  ┌────────────────────────────────────────────────────────────────────────┐
+  │  RENDERING PIPELINE                                                    │
+  │                                                                        │
+  │  1. User requests /en/gi-report/ or /fr/rapport-ig/                   │
+  │  2. Power Pages resolves the Web Page → finds this Web Template       │
+  │  3. Liquid engine executes server-side:                                │
+  │     a. Detects language from webpage.adx_webpage_language              │
+  │     b. Runs {% fetchxml %} for Canadian port service locations        │
+  │     c. Renders all {% if is_fr %} blocks                              │
+  │     d. Populates <select> options from query results                  │
+  │  4. Fully-rendered HTML sent to browser (no AJAX needed for lookups)  │
+  │  5. WET-BOEW initializes wb-frmvld (validation framework)            │
+  │  6. gi-report.js initializes step navigation + conditional logic      │
+  └────────────────────────────────────────────────────────────────────────┘
+  
+  ============================================================================
+  BILINGUAL STRATEGY
+  ============================================================================
+  
+  Power Pages uses paired Web Pages for bilingual content:
+    - /en/gi-report/     → English page (lang="en")
+    - /fr/rapport-ig/    → French page  (lang="fr")
+  
+  Both pages reference THIS SAME web template. The language toggle (#wb-lng)
+  navigates between them (full page reload). The Liquid variable `is_fr`
+  drives all bilingual rendering at the server level.
+  
+  For <select> dropdowns (Next Canadian Port), the option VALUE is the
+  Dataverse GUID (language-independent), while the display TEXT is the
+  localized name. This ensures sessionStorage-based form state restoration
+  after a language toggle works correctly.
+  
+  ============================================================================
+  SECURITY MODEL (v2)
+  ============================================================================
+  
+  - Port lookups: Rendered server-side by {% fetchxml %} — no Web API, no
+    anonymous Read table permissions needed.
+  - Ship data: Plain text inputs (cruise line, vessel name) — no lookup
+    table access. Ship autocomplete can be added later as optional.
+  - Record creation: Handled by Power Automate flow with HTTP trigger.
+    Flow runs with elevated (service account) privileges.
+  - reCAPTCHA: Verified server-side by the flow.
+  - No file uploads: GI Report does not require file attachments.
+  
+  Anonymous table permissions: ZERO. (vs. v1: 3 tables with Read+Create)
+  
+  ============================================================================
+  VALIDATION STRATEGY
+  ============================================================================
+  
+  Primary validation: WET-BOEW's wb-frmvld plugin (accessible error summaries,
+  inline messages, aria-live announcements). The "ignore" selector excludes
+  hidden step panels so only the current step is validated on Next click.
+  
+  Custom JS validation supplements wb-frmvld for:
+    - Date comparison (embarkation ≤ disembarkation)
+    - GI case count ≤ total count (passengers and crew)
+    - Combined date+time assembly for ethi_nextcanadadateandtimeportal
+  
+  ============================================================================
+  DEPENDENCIES
+  ============================================================================
+  
+  Server-side:
+    - Power Pages Liquid engine
+    - Dataverse table: ethi_servicelocation
+    - Site settings: GI/FlowSubmitUrl
+    - Site markers: gi-confirmation-en, gi-confirmation-fr
+  
+  Client-side:
+    - WET-BOEW 4.x (loaded by CDTS)
+    - jQuery (bundled with WET-BOEW)
+    - wb-frmvld plugin (bundled with WET-BOEW)
+    - gi-report.js (companion script)
+    - gi-report.css (companion stylesheet)
+    - Google reCAPTCHA v3 (loaded externally)
+  
+  ============================================================================ -->
+
+
+<!-- ========================================================================
+     LANGUAGE DETECTION
+     ======================================================================== -->
+
+{% assign lang = webpage.adx_webpage_language.adx_languagecode | default: 'en' %}
+{% assign is_fr = false %}
+{% if lang == 'fr' %}{% assign is_fr = true %}{% endif %}
+
+{% if is_fr %}
+  {% assign page_title = 'Rapport d\'enquête sur les maladies gastro-intestinales' %}
+{% else %}
+  {% assign page_title = 'Gastrointestinal Illness Report' %}
+{% endif %}
+
+
+<!-- ========================================================================
+     SERVER-SIDE LOOKUP QUERIES
+     ========================================================================
+     
+     Service locations query for the "Next Canadian Port" dropdown.
+     
+     FILTER:
+       - statecode=0 (active records only)
+       - ethi_travellingpublicprogram = true (TPP-enrolled ports)
+       - ethi_servicelocationtype IN (992800000, 992800001, 992800002)
+       - _ethi_country_value = Canada GUID (Canadian ports only)
+     
+     WHY SERVER-SIDE:
+       1. SECURITY: No anonymous Read permission on ethi_servicelocation
+       2. PERFORMANCE: Dropdown pre-populated in initial HTML
+       3. BILINGUAL: Sort order uses correct language column
+       4. SIMPLICITY: Eliminates getActiveCanadianPorts() JS function
+     ======================================================================== -->
+
+{% fetchxml ports_query %}
+  <fetch>
+    <entity name="ethi_servicelocation">
+      <attribute name="ethi_servicelocationid" />
+      <attribute name="ethi_nameenglish" />
+      <attribute name="ethi_namefrench" />
+      <filter type="and">
+        <condition attribute="statecode" operator="eq" value="0" />
+        <condition attribute="ethi_travellingpublicprogram" operator="eq" value="1" />
+        <condition attribute="_ethi_country_value" operator="eq" value="f23dc860-6f39-ef11-a317-000d3af44283" />
+        <filter type="or">
+          <condition attribute="ethi_servicelocationtype" operator="eq" value="992800000" />
+          <condition attribute="ethi_servicelocationtype" operator="eq" value="992800001" />
+          <condition attribute="ethi_servicelocationtype" operator="eq" value="992800002" />
+        </filter>
+      </filter>
+      <order attribute="{% if is_fr %}ethi_namefrench{% else %}ethi_nameenglish{% endif %}" />
+    </entity>
+  </fetch>
+{% endfetchxml %}
+
+
+<!-- Stylesheet: GCWeb-compatible, 44px touch targets, progress bar, responsive -->
+<link rel="stylesheet" href="/gi-report.css" />
+
+<div class="container">
+
+  <!-- H1 — Skip-link target -->
+  <h1 id="wb-cont">{{ page_title }}</h1>
+
+
+  <!-- ======================================================================
+       PROGRESS INDICATOR
+       ======================================================================
+       Ordered list styled as horizontal step bar. JS manages:
+       - .active + aria-current="step" on current step
+       - .completed on previous steps (green checkmark via CSS)
+       ====================================================================== -->
+
+  <nav aria-label="{% if is_fr %}Progression du formulaire{% else %}Form progress{% endif %}" class="mrgn-bttm-lg">
+    <ol id="gi-progress" class="gi-progress-bar" role="list">
+      <li id="prog-1" class="gi-step active" aria-current="step">
+        <span class="gi-step-num" aria-hidden="true">1</span>
+        <span class="gi-step-label">{% if is_fr %}Navire{% else %}Vessel{% endif %}</span>
+      </li>
+      <li id="prog-2" class="gi-step">
+        <span class="gi-step-num" aria-hidden="true">2</span>
+        <span class="gi-step-label">{% if is_fr %}Port et voyage{% else %}Port & Voyage{% endif %}</span>
+      </li>
+      <li id="prog-3" class="gi-step">
+        <span class="gi-step-num" aria-hidden="true">3</span>
+        <span class="gi-step-label">{% if is_fr %}Cas de MIG{% else %}GI Cases{% endif %}</span>
+      </li>
+      <li id="prog-4" class="gi-step">
+        <span class="gi-step-num" aria-hidden="true">4</span>
+        <span class="gi-step-label">{% if is_fr %}Contact{% else %}Contact{% endif %}</span>
+      </li>
+      <li id="prog-5" class="gi-step">
+        <span class="gi-step-num" aria-hidden="true">5</span>
+        <span class="gi-step-label">{% if is_fr %}Révision{% else %}Review{% endif %}</span>
+      </li>
+    </ol>
+  </nav>
+
+
+  <!-- ======================================================================
+       FORM — wb-frmvld WRAPPER
+       ======================================================================
+       The "ignore" selector tells jQuery Validate to skip fields inside
+       .step-hidden fieldsets. novalidate prevents native browser validation.
+       ====================================================================== -->
+
+  <div class="wb-frmvld" data-wb-frmvld='{"ignore": ".step-hidden input, .step-hidden select, .step-hidden textarea"}'>
+    <form id="gi-report" novalidate>
+
+
+      <!-- ==================================================================
+           STEP 1: VESSEL DETAILS (8 fields)
+           ==================================================================
+           Cruise line and vessel identification. Cruise line and vessel name
+           are plain text in this POC; ship autocomplete can be added later
+           as an optional enhancement requiring Read permission on ethi_ship.
+           ================================================================== -->
+
+      <fieldset id="step-1" class="step-panel" data-step="1">
+        <legend>{% if is_fr %}Étape 1 sur 5 : Détails du navire{% else %}Step 1 of 5: Vessel Details{% endif %}</legend>
+
+        <div class="form-group">
+          <label for="ethi_cruiselinename" class="required"><span class="field-name">{% if is_fr %}Nom de la ligne de croisière{% else %}Cruise Line Name{% endif %}</span> <strong class="required" aria-hidden="true">({% if is_fr %}obligatoire{% else %}required{% endif %})</strong></label>
+          <input type="text" id="ethi_cruiselinename" name="ethi_cruiselinename" class="form-control" required="required" data-rule-maxlength="100" autocomplete="off" />
+        </div>
+
+        <div class="form-group">
+          <label for="ethi_vesselname" class="required"><span class="field-name">{% if is_fr %}Nom du navire{% else %}Vessel Name{% endif %}</span> <strong class="required" aria-hidden="true">({% if is_fr %}obligatoire{% else %}required{% endif %})</strong></label>
+          <input type="text" id="ethi_vesselname" name="ethi_vesselname" class="form-control" required="required" data-rule-maxlength="100" autocomplete="off" />
+        </div>
+
+        <!-- IMO Number — optional 8-digit International Maritime Organization identifier -->
+        <div class="form-group">
+          <label for="ethi_imo"><span class="field-name">{% if is_fr %}Numéro OMI{% else %}IMO Number{% endif %}</span></label>
+          <input type="text" id="ethi_imo" name="ethi_imo" class="form-control" pattern="[0-9]{7,8}" data-msg="{% if is_fr %}Veuillez entrer un numéro OMI valide (7-8 chiffres){% else %}Please enter a valid IMO number (7-8 digits){% endif %}" data-rule-maxlength="8" autocomplete="off" />
+        </div>
+
+        <div class="form-group">
+          <label for="ethi_voyagenumber" class="required"><span class="field-name">{% if is_fr %}Numéro de voyage{% else %}Voyage Number{% endif %}</span> <strong class="required" aria-hidden="true">({% if is_fr %}obligatoire{% else %}required{% endif %})</strong></label>
+          <input type="text" id="ethi_voyagenumber" name="ethi_voyagenumber" class="form-control" required="required" data-rule-maxlength="100" autocomplete="off" />
+        </div>
+
+        <div class="form-group">
+          <label for="ethi_captainsname" class="required"><span class="field-name">{% if is_fr %}Nom du capitaine{% else %}Captain's Name{% endif %}</span> <strong class="required" aria-hidden="true">({% if is_fr %}obligatoire{% else %}required{% endif %})</strong></label>
+          <input type="text" id="ethi_captainsname" name="ethi_captainsname" class="form-control" required="required" data-rule-maxlength="100" autocomplete="off" />
+        </div>
+
+        <div class="form-group">
+          <label for="ethi_captainsemailaddress" class="required"><span class="field-name">{% if is_fr %}Courriel du capitaine{% else %}Captain's Email{% endif %}</span> <strong class="required" aria-hidden="true">({% if is_fr %}obligatoire{% else %}required{% endif %})</strong></label>
+          <input type="email" id="ethi_captainsemailaddress" name="ethi_captainsemailaddress" class="form-control" required="required" data-rule-maxlength="100" autocomplete="email" />
+        </div>
+
+        <div class="form-group">
+          <label for="ethi_shipphonenumber" class="required"><span class="field-name">{% if is_fr %}Téléphone du navire{% else %}Ship Phone Number{% endif %}</span> <strong class="required" aria-hidden="true">({% if is_fr %}obligatoire{% else %}required{% endif %})</strong></label>
+          <input type="tel" id="ethi_shipphonenumber" name="ethi_shipphonenumber" class="form-control" required="required" pattern="[0-9]{10}" data-msg="{% if is_fr %}Veuillez entrer un numéro de téléphone à 10 chiffres{% else %}Please enter a 10-digit phone number{% endif %}" autocomplete="tel" />
+        </div>
+
+        <div class="form-group">
+          <label for="ethi_shipfaxnumber"><span class="field-name">{% if is_fr %}Télécopieur du navire{% else %}Ship Fax Number{% endif %}</span></label>
+          <input type="tel" id="ethi_shipfaxnumber" name="ethi_shipfaxnumber" class="form-control" pattern="[0-9]{10}" data-msg="{% if is_fr %}Veuillez entrer un numéro de télécopieur à 10 chiffres{% else %}Please enter a 10-digit fax number{% endif %}" autocomplete="off" />
+        </div>
+      </fieldset>
+
+
+      <!-- ==================================================================
+           STEP 2: PORT & VOYAGE INFORMATION (7 fields + 1 conditional)
+           ==================================================================
+           Port details and voyage dates. Next Canadian Port is a fetchxml-
+           populated dropdown. When "Other" port is selected, a free-text
+           input appears. Date inputs use type="date" for native pickers.
+           Time uses a <select> with 15-minute intervals.
+           
+           CONDITIONAL: ethi_othernextcanadianport shown when
+           ethi_nextport = GUID_OTHER_PORT ('03fb7ebd-...').
+           
+           CUSTOM VALIDATION: embarkation ≤ disembarkation (JS)
+           ================================================================== -->
+
+      <fieldset id="step-2" class="step-panel step-hidden" data-step="2">
+        <legend>{% if is_fr %}Étape 2 sur 5 : Informations sur le port et le voyage{% else %}Step 2 of 5: Port & Voyage Information{% endif %}</legend>
+
+        <div class="form-group">
+          <label for="ethi_lastport" class="required"><span class="field-name">{% if is_fr %}Dernier port d'escale{% else %}Last Port of Call{% endif %}</span> <strong class="required" aria-hidden="true">({% if is_fr %}obligatoire{% else %}required{% endif %})</strong></label>
+          <input type="text" id="ethi_lastport" name="ethi_lastport" class="form-control" required="required" data-rule-maxlength="100" autocomplete="off" />
+        </div>
+
+        <!-- Next Canadian Port — fetchxml populated service locations -->
+        <div class="form-group">
+          <label for="ethi_nextport" class="required"><span class="field-name">{% if is_fr %}Prochain port canadien{% else %}Next Canadian Port{% endif %}</span> <strong class="required" aria-hidden="true">({% if is_fr %}obligatoire{% else %}required{% endif %})</strong></label>
+          <select id="ethi_nextport" name="ethi_nextport" class="form-control" required="required">
+            <option value="">{% if is_fr %}Sélectionnez un port{% else %}Select a port{% endif %}</option>
+            {% for port in ports_query.results.entities %}
+              <option value="{{ port.ethi_servicelocationid }}">{% if is_fr %}{{ port.ethi_namefrench | default: port.ethi_nameenglish }}{% else %}{{ port.ethi_nameenglish }}{% endif %}</option>
+            {% endfor %}
+            <!-- "Other" option — triggers conditional field -->
+            <option value="03fb7ebd-13e3-ef11-9342-6045bdf97903">{% if is_fr %}Autre{% else %}Other{% endif %}</option>
+          </select>
+        </div>
+
+        <!-- Conditional: Other Next Canadian Port (shown when "Other" selected) -->
+        <div class="form-group" id="other-port-group" style="display:none;">
+          <label for="ethi_othernextcanadianport" class="required"><span class="field-name">{% if is_fr %}Autre prochain port canadien{% else %}Other Next Canadian Port{% endif %}</span> <strong class="required" aria-hidden="true">({% if is_fr %}obligatoire{% else %}required{% endif %})</strong></label>
+          <input type="text" id="ethi_othernextcanadianport" name="ethi_othernextcanadianport" class="form-control" required="required" data-rule-maxlength="100" />
+        </div>
+
+        <!-- Next Canada Date -->
+        <div class="form-group">
+          <label for="ethi_nextcanadadate" class="required"><span class="field-name">{% if is_fr %}Date d'arrivée au prochain port canadien{% else %}Next Canadian Port Arrival Date{% endif %}</span> <strong class="required" aria-hidden="true">({% if is_fr %}obligatoire{% else %}required{% endif %})</strong></label>
+          <input type="date" id="ethi_nextcanadadate" name="ethi_nextcanadadate" class="form-control" required="required" aria-describedby="next-date-hint" />
+          <span class="help-block wb-inv" id="next-date-hint">{% if is_fr %}Format : AAAA-MM-JJ{% else %}Format: YYYY-MM-DD{% endif %}</span>
+        </div>
+
+        <!-- Next Canada Time — 15-minute interval select for accessibility -->
+        <div class="form-group">
+          <label for="ethi_nextcanadatime" class="required"><span class="field-name">{% if is_fr %}Heure d'arrivée au prochain port canadien{% else %}Next Canadian Port Arrival Time{% endif %}</span> <strong class="required" aria-hidden="true">({% if is_fr %}obligatoire{% else %}required{% endif %})</strong></label>
+          <select id="ethi_nextcanadatime" name="ethi_nextcanadatime" class="form-control" required="required">
+            <option value="">{% if is_fr %}Sélectionnez une heure{% else %}Select a time{% endif %}</option>
+            <option value="00:00">12:00 AM</option><option value="00:15">12:15 AM</option>
+            <option value="00:30">12:30 AM</option><option value="00:45">12:45 AM</option>
+            <option value="01:00">1:00 AM</option><option value="01:15">1:15 AM</option>
+            <option value="01:30">1:30 AM</option><option value="01:45">1:45 AM</option>
+            <option value="02:00">2:00 AM</option><option value="02:15">2:15 AM</option>
+            <option value="02:30">2:30 AM</option><option value="02:45">2:45 AM</option>
+            <option value="03:00">3:00 AM</option><option value="03:15">3:15 AM</option>
+            <option value="03:30">3:30 AM</option><option value="03:45">3:45 AM</option>
+            <option value="04:00">4:00 AM</option><option value="04:15">4:15 AM</option>
+            <option value="04:30">4:30 AM</option><option value="04:45">4:45 AM</option>
+            <option value="05:00">5:00 AM</option><option value="05:15">5:15 AM</option>
+            <option value="05:30">5:30 AM</option><option value="05:45">5:45 AM</option>
+            <option value="06:00">6:00 AM</option><option value="06:15">6:15 AM</option>
+            <option value="06:30">6:30 AM</option><option value="06:45">6:45 AM</option>
+            <option value="07:00">7:00 AM</option><option value="07:15">7:15 AM</option>
+            <option value="07:30">7:30 AM</option><option value="07:45">7:45 AM</option>
+            <option value="08:00">8:00 AM</option><option value="08:15">8:15 AM</option>
+            <option value="08:30">8:30 AM</option><option value="08:45">8:45 AM</option>
+            <option value="09:00">9:00 AM</option><option value="09:15">9:15 AM</option>
+            <option value="09:30">9:30 AM</option><option value="09:45">9:45 AM</option>
+            <option value="10:00">10:00 AM</option><option value="10:15">10:15 AM</option>
+            <option value="10:30">10:30 AM</option><option value="10:45">10:45 AM</option>
+            <option value="11:00">11:00 AM</option><option value="11:15">11:15 AM</option>
+            <option value="11:30">11:30 AM</option><option value="11:45">11:45 AM</option>
+            <option value="12:00">12:00 PM</option><option value="12:15">12:15 PM</option>
+            <option value="12:30">12:30 PM</option><option value="12:45">12:45 PM</option>
+            <option value="13:00">1:00 PM</option><option value="13:15">1:15 PM</option>
+            <option value="13:30">1:30 PM</option><option value="13:45">1:45 PM</option>
+            <option value="14:00">2:00 PM</option><option value="14:15">2:15 PM</option>
+            <option value="14:30">2:30 PM</option><option value="14:45">2:45 PM</option>
+            <option value="15:00">3:00 PM</option><option value="15:15">3:15 PM</option>
+            <option value="15:30">3:30 PM</option><option value="15:45">3:45 PM</option>
+            <option value="16:00">4:00 PM</option><option value="16:15">4:15 PM</option>
+            <option value="16:30">4:30 PM</option><option value="16:45">4:45 PM</option>
+            <option value="17:00">5:00 PM</option><option value="17:15">5:15 PM</option>
+            <option value="17:30">5:30 PM</option><option value="17:45">5:45 PM</option>
+            <option value="18:00">6:00 PM</option><option value="18:15">6:15 PM</option>
+            <option value="18:30">6:30 PM</option><option value="18:45">6:45 PM</option>
+            <option value="19:00">7:00 PM</option><option value="19:15">7:15 PM</option>
+            <option value="19:30">7:30 PM</option><option value="19:45">7:45 PM</option>
+            <option value="20:00">8:00 PM</option><option value="20:15">8:15 PM</option>
+            <option value="20:30">8:30 PM</option><option value="20:45">8:45 PM</option>
+            <option value="21:00">9:00 PM</option><option value="21:15">9:15 PM</option>
+            <option value="21:30">9:30 PM</option><option value="21:45">9:45 PM</option>
+            <option value="22:00">10:00 PM</option><option value="22:15">10:15 PM</option>
+            <option value="22:30">10:30 PM</option><option value="22:45">10:45 PM</option>
+            <option value="23:00">11:00 PM</option><option value="23:15">11:15 PM</option>
+            <option value="23:30">11:30 PM</option><option value="23:45">11:45 PM</option>
+          </select>
+        </div>
+
+        <!-- Embarkation / Disembarkation dates — cross-field validation by JS -->
+        <div class="form-group">
+          <label for="ethi_embarkationdate" class="required"><span class="field-name">{% if is_fr %}Date d'embarquement{% else %}Embarkation Date{% endif %}</span> <strong class="required" aria-hidden="true">({% if is_fr %}obligatoire{% else %}required{% endif %})</strong></label>
+          <input type="date" id="ethi_embarkationdate" name="ethi_embarkationdate" class="form-control" required="required" aria-describedby="embark-hint" />
+          <span class="help-block wb-inv" id="embark-hint">{% if is_fr %}Format : AAAA-MM-JJ{% else %}Format: YYYY-MM-DD{% endif %}</span>
+        </div>
+
+        <div class="form-group">
+          <label for="ethi_disembarkationdate" class="required"><span class="field-name">{% if is_fr %}Date de débarquement{% else %}Disembarkation Date{% endif %}</span> <strong class="required" aria-hidden="true">({% if is_fr %}obligatoire{% else %}required{% endif %})</strong></label>
+          <input type="date" id="ethi_disembarkationdate" name="ethi_disembarkationdate" class="form-control" required="required" aria-describedby="disembark-hint" />
+          <span class="help-block wb-inv" id="disembark-hint">{% if is_fr %}Format : AAAA-MM-JJ{% else %}Format: YYYY-MM-DD{% endif %}</span>
+        </div>
+      </fieldset>
+
+
+      <!-- ==================================================================
+           STEP 3: GI CASE DETAILS (5 fields)
+           ==================================================================
+           Report type and illness counts. Integer fields use type="number"
+           with min/max constraints. Custom JS validation ensures GI case
+           counts do not exceed total counts.
+           
+           Report type rendered as radio group for clarity (few options).
+           ================================================================== -->
+
+      <fieldset id="step-3" class="step-panel step-hidden" data-step="3">
+        <legend>{% if is_fr %}Étape 3 sur 5 : Détails des cas de maladie gastro-intestinale{% else %}Step 3 of 5: Gastrointestinal Illness Case Details{% endif %}</legend>
+
+        <!-- Report Type — rendered as radio group -->
+        <fieldset class="form-group">
+          <legend class="field-label"><span class="field-name">{% if is_fr %}Type de rapport{% else %}Report Type{% endif %}</span> <strong class="required" aria-hidden="true">({% if is_fr %}obligatoire{% else %}required{% endif %})</strong></legend>
+          <label class="radio-inline">
+            <input type="radio" name="ethi_reporttype" id="ethi_reporttype_initial" value="992800000" required="required" />
+            {% if is_fr %}Rapport initial{% else %}Initial Report{% endif %}
+          </label>
+          <label class="radio-inline">
+            <input type="radio" name="ethi_reporttype" id="ethi_reporttype_update" value="992800001" />
+            {% if is_fr %}Rapport de mise à jour{% else %}Update Report{% endif %}
+          </label>
+          <label class="radio-inline">
+            <input type="radio" name="ethi_reporttype" id="ethi_reporttype_final" value="992800002" />
+            {% if is_fr %}Rapport final{% else %}Final Report{% endif %}
+          </label>
+        </fieldset>
+
+        <div class="form-group">
+          <label for="ethi_totalnumberofpassengersonboard" class="required"><span class="field-name">{% if is_fr %}Nombre total de passagers à bord{% else %}Total Passengers on Board{% endif %}</span> <strong class="required" aria-hidden="true">({% if is_fr %}obligatoire{% else %}required{% endif %})</strong></label>
+          <input type="number" id="ethi_totalnumberofpassengersonboard" name="ethi_totalnumberofpassengersonboard" class="form-control" required="required" min="0" max="9999999" />
+        </div>
+
+        <div class="form-group">
+          <label for="ethi_numberofpassengergastrointestinalcases" class="required"><span class="field-name">{% if is_fr %}Nombre de cas de MIG chez les passagers{% else %}Passenger Gastrointestinal Cases{% endif %}</span> <strong class="required" aria-hidden="true">({% if is_fr %}obligatoire{% else %}required{% endif %})</strong></label>
+          <input type="number" id="ethi_numberofpassengergastrointestinalcases" name="ethi_numberofpassengergastrointestinalcases" class="form-control" required="required" min="0" max="9999999" />
+        </div>
+
+        <div class="form-group">
+          <label for="ethi_totalnumberofcrewonboard" class="required"><span class="field-name">{% if is_fr %}Nombre total de membres d'équipage à bord{% else %}Total Crew on Board{% endif %}</span> <strong class="required" aria-hidden="true">({% if is_fr %}obligatoire{% else %}required{% endif %})</strong></label>
+          <input type="number" id="ethi_totalnumberofcrewonboard" name="ethi_totalnumberofcrewonboard" class="form-control" required="required" min="0" max="9999999" />
+        </div>
+
+        <div class="form-group">
+          <label for="ethi_numberofcrewgastrointestinalcases" class="required"><span class="field-name">{% if is_fr %}Nombre de cas de MIG chez l'équipage{% else %}Crew Gastrointestinal Cases{% endif %}</span> <strong class="required" aria-hidden="true">({% if is_fr %}obligatoire{% else %}required{% endif %})</strong></label>
+          <input type="number" id="ethi_numberofcrewgastrointestinalcases" name="ethi_numberofcrewgastrointestinalcases" class="form-control" required="required" min="0" max="9999999" />
+        </div>
+      </fieldset>
+
+
+      <!-- ==================================================================
+           STEP 4: CONTACT INFORMATION (4 + 4 conditional fields)
+           ==================================================================
+           Medical contact is always required. "Submitter is medical contact?"
+           radio toggle: if No, a second set of submitter fields appears.
+           
+           CONDITIONAL: #submitter-section shown when
+           ethi_submitterismedicalcontact = 0 (No).
+           ================================================================== -->
+
+      <fieldset id="step-4" class="step-panel step-hidden" data-step="4">
+        <legend>{% if is_fr %}Étape 4 sur 5 : Coordonnées{% else %}Step 4 of 5: Contact Information{% endif %}</legend>
+
+        <h3>{% if is_fr %}Personne-ressource médicale{% else %}Medical Contact{% endif %}</h3>
+
+        <div class="form-group">
+          <label for="ethi_medicalcontactname" class="required"><span class="field-name">{% if is_fr %}Nom{% else %}Name{% endif %}</span> <strong class="required" aria-hidden="true">({% if is_fr %}obligatoire{% else %}required{% endif %})</strong></label>
+          <input type="text" id="ethi_medicalcontactname" name="ethi_medicalcontactname" class="form-control" required="required" data-rule-maxlength="100" autocomplete="name" />
+        </div>
+
+        <div class="form-group">
+          <label for="ethi_medicalcontacttitle" class="required"><span class="field-name">{% if is_fr %}Titre{% else %}Title{% endif %}</span> <strong class="required" aria-hidden="true">({% if is_fr %}obligatoire{% else %}required{% endif %})</strong></label>
+          <input type="text" id="ethi_medicalcontacttitle" name="ethi_medicalcontacttitle" class="form-control" required="required" data-rule-maxlength="100" autocomplete="off" />
+        </div>
+
+        <div class="form-group">
+          <label for="ethi_medicalcontactemailaddress" class="required"><span class="field-name">{% if is_fr %}Courriel{% else %}Email{% endif %}</span> <strong class="required" aria-hidden="true">({% if is_fr %}obligatoire{% else %}required{% endif %})</strong></label>
+          <input type="email" id="ethi_medicalcontactemailaddress" name="ethi_medicalcontactemailaddress" class="form-control" required="required" data-rule-maxlength="100" autocomplete="email" />
+        </div>
+
+        <div class="form-group">
+          <label for="ethi_medicalcontactphonenumber" class="required"><span class="field-name">{% if is_fr %}Téléphone{% else %}Phone{% endif %}</span> <strong class="required" aria-hidden="true">({% if is_fr %}obligatoire{% else %}required{% endif %})</strong></label>
+          <input type="tel" id="ethi_medicalcontactphonenumber" name="ethi_medicalcontactphonenumber" class="form-control" required="required" pattern="[0-9]{10}" data-msg="{% if is_fr %}Veuillez entrer un numéro de téléphone à 10 chiffres{% else %}Please enter a 10-digit phone number{% endif %}" autocomplete="tel" />
+        </div>
+
+        <!-- Submitter toggle: Is the submitter the same as the medical contact? -->
+        <fieldset class="form-group mrgn-tp-lg">
+          <legend class="field-label"><span class="field-name">{% if is_fr %}L'expéditeur est-il la personne-ressource médicale?{% else %}Is the submitter the medical contact?{% endif %}</span> <strong class="required" aria-hidden="true">({% if is_fr %}obligatoire{% else %}required{% endif %})</strong></legend>
+          <label class="radio-inline">
+            <input type="radio" name="ethi_submitterismedicalcontact" id="ethi_submitterismedicalcontact_1" value="1" required="required" checked="checked" />
+            {% if is_fr %}Oui{% else %}Yes{% endif %}
+          </label>
+          <label class="radio-inline">
+            <input type="radio" name="ethi_submitterismedicalcontact" id="ethi_submitterismedicalcontact_0" value="0" />
+            {% if is_fr %}Non{% else %}No{% endif %}
+          </label>
+        </fieldset>
+
+        <!-- Conditional: Submitter fields (shown when "No" is selected) -->
+        <div id="submitter-section" style="display:none;">
+          <h3>{% if is_fr %}Informations sur l'expéditeur{% else %}Submitter Information{% endif %}</h3>
+
+          <div class="form-group">
+            <label for="ethi_yourname" class="required"><span class="field-name">{% if is_fr %}Votre nom{% else %}Your Name{% endif %}</span> <strong class="required" aria-hidden="true">({% if is_fr %}obligatoire{% else %}required{% endif %})</strong></label>
+            <input type="text" id="ethi_yourname" name="ethi_yourname" class="form-control" required="required" data-rule-maxlength="100" autocomplete="name" />
+          </div>
+
+          <div class="form-group">
+            <label for="ethi_yourtitle" class="required"><span class="field-name">{% if is_fr %}Votre titre{% else %}Your Title{% endif %}</span> <strong class="required" aria-hidden="true">({% if is_fr %}obligatoire{% else %}required{% endif %})</strong></label>
+            <input type="text" id="ethi_yourtitle" name="ethi_yourtitle" class="form-control" required="required" data-rule-maxlength="100" autocomplete="off" />
+          </div>
+
+          <div class="form-group">
+            <label for="ethi_youremailaddress" class="required"><span class="field-name">{% if is_fr %}Votre courriel{% else %}Your Email{% endif %}</span> <strong class="required" aria-hidden="true">({% if is_fr %}obligatoire{% else %}required{% endif %})</strong></label>
+            <input type="email" id="ethi_youremailaddress" name="ethi_youremailaddress" class="form-control" required="required" data-rule-maxlength="100" autocomplete="email" />
+          </div>
+
+          <div class="form-group">
+            <label for="ethi_yourphonenumber" class="required"><span class="field-name">{% if is_fr %}Votre téléphone{% else %}Your Phone{% endif %}</span> <strong class="required" aria-hidden="true">({% if is_fr %}obligatoire{% else %}required{% endif %})</strong></label>
+            <input type="tel" id="ethi_yourphonenumber" name="ethi_yourphonenumber" class="form-control" required="required" pattern="[0-9]{10}" data-msg="{% if is_fr %}Veuillez entrer un numéro de téléphone à 10 chiffres{% else %}Please enter a 10-digit phone number{% endif %}" autocomplete="tel" />
+          </div>
+        </div>
+      </fieldset>
+
+
+      <!-- ==================================================================
+           STEP 5: REVIEW & SUBMIT
+           ==================================================================
+           generateReviewSummary() populates #review-content with tables.
+           reCAPTCHA v3 invisible badge renders in #recaptcha-widget.
+           Submit flow: reCAPTCHA → Power Automate → redirect (no file uploads).
+           ================================================================== -->
+
+      <fieldset id="step-5" class="step-panel step-hidden" data-step="5">
+        <legend>{% if is_fr %}Étape 5 sur 5 : Révision et soumission{% else %}Step 5 of 5: Review & Submit{% endif %}</legend>
+        <div id="review-summary" class="well">
+          <p>{% if is_fr %}Veuillez vérifier les informations ci-dessous avant de soumettre votre rapport.{% else %}Please review the information below before submitting your report.{% endif %}</p>
+          <div id="review-content"><!-- JS-populated review tables --></div>
+        </div>
+        <div id="recaptcha-container" class="mrgn-tp-lg mrgn-bttm-lg">
+          <div id="recaptcha-widget"></div>
+        </div>
+      </fieldset>
+
+
+      <!-- ==================================================================
+           NAVIGATION BUTTONS
+           ================================================================== -->
+
+      <div class="step-nav mrgn-tp-lg clearfix">
+        <button type="button" id="btn-prev" class="btn btn-default pull-left" style="display:none;" aria-label="{% if is_fr %}Étape précédente{% else %}Previous step{% endif %}">
+          <span class="glyphicon glyphicon-chevron-left" aria-hidden="true"></span> {% if is_fr %}Précédent{% else %}Previous{% endif %}
+        </button>
+        <button type="button" id="btn-next" class="btn btn-primary pull-right" aria-label="{% if is_fr %}Étape suivante{% else %}Next step{% endif %}">
+          {% if is_fr %}Suivant{% else %}Next{% endif %} <span class="glyphicon glyphicon-chevron-right" aria-hidden="true"></span>
+        </button>
+        <button type="submit" id="btn-submit" class="btn btn-success pull-right" style="display:none;">{% if is_fr %}Soumettre{% else %}Submit{% endif %}</button>
+      </div>
+
+      <!-- Hidden fields -->
+      <input type="hidden" name="ethi_submittimeutc" id="ethi_submittimeutc" />
+      <input type="hidden" name="ethi_nextcanadadateandtimeportal" id="ethi_nextcanadadateandtimeportal" />
+      <input type="hidden" name="ethi_stepid" id="ethi_stepid" />
+      <input type="hidden" name="__RequestVerificationToken" value="{{ request_verification_token }}" />
+    </form>
+  </div>
+
+</div>
+
+
+<!-- ========================================================================
+     CONFIGURATION — Liquid → JavaScript Bridge
+     ======================================================================== -->
+
+<script>
+  window.GI_CONFIG = {
+    flowUrl: '{{ sitesettings["GI/FlowSubmitUrl"] }}',
+    lang: '{{ lang }}',
+    isFr: {{ is_fr }},
+    confirmUrlEn: '{{ sitemarkers["gi-confirmation-en"].url | default: "/en/gi-report/confirmation/" }}',
+    confirmUrlFr: '{{ sitemarkers["gi-confirmation-fr"].url | default: "/fr/rapport-ig/confirmation/" }}'
+  };
+</script>
+<script src="/gi-report.js"></script>

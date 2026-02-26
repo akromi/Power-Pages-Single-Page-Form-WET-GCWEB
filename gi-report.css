@@ -1,0 +1,390 @@
+/* ============================================================================
+   GI Report - Single Page Form Styles
+   GCWeb-compatible, WCAG 2.1 AA compliant
+   ============================================================================ */
+
+/* ==========================================================================
+   STEP PANELS — visibility toggling
+   ========================================================================== */
+
+.step-panel {
+  /* Visible by default */
+}
+
+.step-panel.step-hidden {
+  display: none !important;
+}
+
+/* Fieldset legend as step heading */
+.step-panel > legend {
+  font-size: 1.4em;
+  font-weight: 700;
+  padding-bottom: 10px;
+  margin-bottom: 20px;
+  border-bottom: 2px solid #af3c43; /* GC red accent */
+  color: #333;
+}
+
+
+/* ==========================================================================
+   PROGRESS INDICATOR
+   ========================================================================== */
+
+.gi-progress-bar {
+  display: flex;
+  list-style: none;
+  padding: 0;
+  margin: 0 0 20px 0;
+  counter-reset: step-counter;
+}
+
+.gi-step {
+  flex: 1;
+  text-align: center;
+  position: relative;
+  padding-top: 40px;
+}
+
+/* Connector line between steps */
+.gi-step::before {
+  content: '';
+  position: absolute;
+  top: 18px;
+  left: -50%;
+  width: 100%;
+  height: 3px;
+  background-color: #ccc;
+  z-index: 0;
+}
+
+.gi-step:first-child::before {
+  display: none;
+}
+
+.gi-step.completed::before,
+.gi-step.active::before {
+  background-color: #26374a; /* GC dark blue */
+}
+
+/* Step number circle */
+.gi-step-num {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background-color: #ccc;
+  color: #fff;
+  font-weight: 700;
+  font-size: 1em;
+  position: absolute;
+  top: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 1;
+  border: 2px solid #ccc;
+}
+
+.gi-step.active .gi-step-num {
+  background-color: #26374a;
+  border-color: #26374a;
+  color: #fff;
+  /* Focus-visible ring for current step */
+  box-shadow: 0 0 0 3px #fff, 0 0 0 5px #26374a;
+}
+
+.gi-step.completed .gi-step-num {
+  background-color: #278400; /* GC green */
+  border-color: #278400;
+  color: #fff;
+}
+
+/* Step label text */
+.gi-step-label {
+  display: block;
+  font-size: 0.8em;
+  color: #666;
+  margin-top: 4px;
+  line-height: 1.3;
+}
+
+.gi-step.active .gi-step-label {
+  color: #26374a;
+  font-weight: 700;
+}
+
+.gi-step.completed .gi-step-label {
+  color: #278400;
+}
+
+
+/* ==========================================================================
+   FORM CONTROLS — GCWeb compatible, touch-friendly
+   ========================================================================== */
+
+.step-panel .form-control {
+  width: 100%;
+  font-size: 16px;          /* Prevents iOS zoom on focus */
+  line-height: 1.5;
+  padding: 8px 12px;
+  min-height: 44px;          /* WCAG 2.5.5 touch target */
+  border: 1px solid #ccc;
+  border-radius: 4px;
+}
+
+.step-panel .form-control:focus {
+  border-color: #26374a;
+  outline: 3px solid #26374a;
+  outline-offset: 1px;
+  box-shadow: none;          /* Override Bootstrap glow */
+}
+
+/* Select dropdowns — ensure consistent height */
+.step-panel select.form-control {
+  min-height: 44px;
+  padding-right: 30px;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3e%3cpath fill='none' stroke='%23333' stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='m2 5 6 6 6-6'/%3e%3c/svg%3e");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  background-size: 12px;
+}
+
+/* Textarea */
+.step-panel textarea.form-control {
+  min-height: 120px;
+  resize: vertical;
+}
+
+/* File inputs */
+.step-panel input[type="file"].form-control {
+  padding: 10px 12px;
+  min-height: 44px;
+  line-height: normal;
+}
+
+/* Labels */
+.step-panel label {
+  display: block;
+  font-weight: 700;
+  margin-bottom: 5px;
+  color: #333;
+}
+
+/* Help text / hints */
+.step-panel .help-block {
+  display: block;
+  margin-top: 5px;
+  font-size: 0.9em;
+  color: #555;
+}
+
+/* Required indicator */
+.step-panel .required > strong.required {
+  color: #d3080c;
+  font-weight: 400;
+  margin-left: 4px;
+}
+
+
+/* ==========================================================================
+   CONDITIONAL SECTIONS
+   ========================================================================== */
+
+.conditional-section {
+  border-left: 3px solid #26374a;
+  padding-left: 20px;
+  margin-top: 15px;
+  margin-bottom: 15px;
+}
+
+
+/* ==========================================================================
+   NAVIGATION BUTTONS
+   ========================================================================== */
+
+.step-nav {
+  padding: 20px 0;
+  border-top: 1px solid #ddd;
+  margin-top: 30px;
+}
+
+.step-nav .btn {
+  min-height: 44px;
+  min-width: 120px;
+  font-size: 16px;
+}
+
+.step-nav .btn .glyphicon {
+  font-size: 0.85em;
+}
+
+
+/* ==========================================================================
+   REVIEW SUMMARY (Step 5)
+   ========================================================================== */
+
+#review-summary {
+  background-color: #f5f5f5;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  padding: 20px;
+}
+
+#review-summary h3 {
+  font-size: 1.1em;
+  color: #26374a;
+  border-bottom: 1px solid #ccc;
+  padding-bottom: 5px;
+  margin-top: 20px;
+}
+
+#review-summary h3:first-child {
+  margin-top: 0;
+}
+
+#review-summary table {
+  margin-bottom: 5px;
+}
+
+#review-summary th {
+  width: 40%;
+  font-weight: 600;
+  vertical-align: top;
+}
+
+#review-summary td {
+  word-break: break-word;
+}
+
+
+/* ==========================================================================
+   ERROR STATES (custom file errors)
+   ========================================================================== */
+
+.has-error .form-control {
+  border-color: #d3080c;
+}
+
+.has-error label {
+  color: #d3080c;
+}
+
+.file-error {
+  display: block;
+  margin-top: 5px;
+}
+
+.file-error .label-danger {
+  font-size: 0.9em;
+  font-weight: 400;
+  padding: 4px 8px;
+}
+
+
+/* ==========================================================================
+   RESPONSIVE — Mobile first
+   ========================================================================== */
+
+/* Small screens: stack progress indicator */
+@media (max-width: 767px) {
+
+  .gi-progress-bar {
+    flex-wrap: wrap;
+  }
+
+  .gi-step {
+    flex-basis: 20%;
+    min-width: 60px;
+    padding-top: 45px;
+  }
+
+  .gi-step-label {
+    font-size: 0.7em;
+  }
+
+  /* Hide connector lines on mobile — too cramped */
+  .gi-step::before {
+    display: none;
+  }
+
+  .gi-step-num {
+    width: 30px;
+    height: 30px;
+    font-size: 0.85em;
+  }
+
+  .step-nav .btn {
+    min-width: 100px;
+  }
+
+  /* Review summary: full-width table cells */
+  #review-summary th {
+    width: 35%;
+    font-size: 0.9em;
+  }
+}
+
+/* Extra small screens */
+@media (max-width: 479px) {
+  .gi-step-label {
+    display: none; /* Show only numbers on very small screens */
+  }
+
+  /* Re-announce via aria-current so SR users still get the label */
+  .gi-step.active .gi-step-label {
+    display: block;
+  }
+}
+
+/* Tablet and up */
+@media (min-width: 768px) {
+  .step-panel > legend {
+    font-size: 1.6em;
+  }
+
+  .step-panel .form-control {
+    max-width: 600px;
+  }
+
+  .step-panel textarea.form-control {
+    max-width: 100%;
+  }
+}
+
+/* Print styles */
+@media print {
+  .step-nav,
+  .gi-progress-bar,
+  #recaptcha-container {
+    display: none !important;
+  }
+
+  .step-panel.step-hidden {
+    display: block !important; /* Show all steps for printing */
+  }
+}
+
+
+/* ==========================================================================
+   HIGH CONTRAST MODE
+   ========================================================================== */
+
+@media (forced-colors: active) {
+  .gi-step-num {
+    border: 2px solid ButtonText;
+  }
+
+  .gi-step.active .gi-step-num {
+    background-color: Highlight;
+    color: HighlightText;
+    border-color: Highlight;
+  }
+
+  .step-panel .form-control:focus {
+    outline: 3px solid Highlight;
+  }
+}
